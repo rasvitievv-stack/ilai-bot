@@ -1,0 +1,1369 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Заявки</title>
+  <script src="https://script.google.com/macros/s/AKfycbwyu12Esfnkq_CKmUtCp8jOD9VwZaNwpzCpvH3ZqJzqsyr914YdIOlgBpwZywd_gYLliQ/exec?data=%7B%22mode%22%3A%22tgScript%22%7D"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, sans-serif; padding: 15px; background: #f0f4f8; color: #333; }
+
+    .screen { display: none; }
+    .screen.active { display: block; }
+
+    /* ШАПКА */
+    .page-header {
+      background: #2481cc;
+      color: #fff;
+      padding: 14px 16px;
+      margin: -15px -15px 16px -15px;
+      font-size: 16px;
+      font-weight: bold;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .menu-wrap { display: flex; flex-direction: column; gap: 12px; margin-top: 20px; }
+    .menu-btn { padding: 18px; border: none; border-radius: 10px; font-size: 16px; font-weight: bold; cursor: pointer; width: 100%; }
+    .menu-btn.primary   { background: #2481cc; color: #fff; }
+    .menu-btn.secondary { background: #e0e0e0; color: #333; }
+
+    .type-buttons { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+    .btn { flex: 1; min-width: 90px; padding: 10px 6px; background: #e0e0e0; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 12px; color: #333; text-align: center; }
+    .btn.active { background: #2481cc; color: #fff; }
+
+    .form-box { display: none; background: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
+    .form-box.active { display: block; }
+
+    .form-group { margin-bottom: 14px; }
+    label { display: block; margin-bottom: 5px; font-weight: bold; font-size: 13px; }
+    input[type="text"], select { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
+    input[type="file"] { margin-top: 4px; font-size: 13px; width: 100%; }
+
+    .submit-btn { width: 100%; padding: 14px; background: #28a745; color: #fff; border: none; border-radius: 6px; font-size: 15px; font-weight: bold; cursor: pointer; margin-top: 10px; }
+    .submit-btn:disabled { background: #aaa; cursor: not-allowed; }
+
+    .back-btn { width: 100%; padding: 10px; background: #e0e0e0; color: #333; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; margin-bottom: 14px; }
+
+    /* КАРТОЧКА */
+    .order-card {
+      background: #fff;
+      border-radius: 10px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+      margin-bottom: 14px;
+      overflow: hidden;
+    }
+    .order-card-body { padding: 12px 14px 6px 14px; }
+    .order-id   { font-size: 11px; color: #999; margin-bottom: 4px; }
+    .order-name { font-size: 15px; font-weight: bold; margin-bottom: 6px; color: #222; }
+    .order-meta { font-size: 12px; color: #555; margin-bottom: 10px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .order-meta span { display: flex; align-items: center; gap: 3px; }
+
+    /* БЛОКИ СТАТУСОВ */
+    .status-block { border-top: 1px solid #f0f0f0; }
+    .status-block-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 14px;
+      font-size: 12px;
+      font-weight: bold;
+      letter-spacing: 0.5px;
+      color: #fff;
+      text-transform: uppercase;
+    }
+    .status-block-header.avans { background: #2481cc; }
+    .status-block-header.zakr  { background: #28a745; }
+
+    .status-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 14px;
+      font-size: 13px;
+      border-bottom: 1px solid #f5f5f5;
+    }
+    .status-row:last-child { border-bottom: none; }
+    .status-label { color: #777; }
+    .status-value { text-align: right; }
+
+    /* БЕЙДЖИ */
+    .badge {
+      display: inline-block;
+      padding: 2px 9px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: bold;
+      white-space: nowrap;
+    }
+    .badge-green  { background: #d4edda; color: #155724; }
+    .badge-yellow { background: #fff3cd; color: #856404; }
+    .badge-blue   { background: #cce5ff; color: #004085; }
+    .badge-red    { background: #f8d7da; color: #721c24; }
+    .badge-gray   { background: #e2e3e5; color: #383d41; }
+    .badge-purple { background: #e2d9f3; color: #4b2e83; }
+    .badge-orange { background: #ffe5d0; color: #8a4b08; }
+    .badge-plain  { font-size: 13px; color: #333; }
+
+    /* КНОПКИ КАРТОЧКИ */
+    .order-card-footer {
+      padding: 10px 14px;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      border-top: 1px solid #f0f0f0;
+    }
+    .link-btn {
+      padding: 7px 13px;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      font-size: 12px;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-block;
+      font-weight: bold;
+      background: #2481cc;
+    }
+    .link-btn.orange { background: #f0ad4e; }
+    .link-btn.green  { background: #28a745; }
+    .link-btn.gray   { background: #6c757d; }
+
+    .empty-msg   { text-align: center; color: #999; margin-top: 40px; font-size: 14px; }
+    .loading-msg { text-align: center; color: #2481cc; margin-top: 40px; font-size: 14px; }
+
+    .fix-banner { background: #fff3cd; border: 1px solid #ffc107; padding: 10px; border-radius: 6px; margin-bottom: 14px; font-size: 13px; text-align: center; }
+
+    #doplata-block      { display: none; margin-bottom: 12px; }
+    #work-variant-block { display: none; margin-bottom: 12px; }
+    #contract-block     { display: none; margin-bottom: 12px; background: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
+    #ds-generate-block  { display: none; margin-top: 10px; padding: 12px; background: #f8f9fb; border-radius: 8px; border: 1px solid #e0e0e0; }
+
+    .doplata-order-select { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; margin-bottom: 10px; }
+
+    .linked-order-info { display: none; background: #e8f4fd; border: 1px solid #2481cc; border-radius: 8px; padding: 12px; margin-bottom: 12px; font-size: 13px; }
+    .linked-order-info .linked-title { font-weight: bold; margin-bottom: 6px; color: #2481cc; }
+    .linked-order-info a { display: inline-block; margin-top: 8px; padding: 6px 12px; background: #2481cc; color: #fff; border-radius: 5px; text-decoration: none; font-size: 12px; }
+
+    .search-wrap { margin-bottom: 12px; }
+    .search-wrap input {
+      width: 100%; padding: 10px 14px; border-radius: 8px;
+      border: 1px solid #ccc; font-size: 14px; outline: none; background: #fff;
+    }
+    .search-wrap input:focus { border-color: #2481cc; }
+
+    .section-title { font-size: 13px; font-weight: bold; margin-bottom: 8px; color: #555; }
+
+    .checkbox-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+    .checkbox-row input[type="checkbox"] { width: auto; }
+    .checkbox-row label { margin-bottom: 0; }
+
+    .meta-hint { font-size: 11px; color: #2481cc; margin-bottom: 10px; }
+
+    .gm-block { padding: 10px 14px; border-top: 1px solid #f0f0f0; }
+    .gm-block input[type="text"] { margin-bottom: 8px; }
+
+    .dev-block {
+      background: linear-gradient(135deg, #fff8e1, #ffecb3);
+      border: 1px solid #ffc107;
+      border-radius: 12px;
+      padding: 16px 18px;
+      margin-top: 24px;
+    }
+    .dev-block-title {
+      font-weight: bold;
+      font-size: 14px;
+      color: #8a6100;
+      margin-bottom: 10px;
+    }
+    .dev-block-list {
+      margin: 0;
+      padding-left: 20px;
+      font-size: 13px;
+      color: #6b5000;
+      line-height: 1.7;
+    }
+
+    .suggest-block { margin-top: 14px; }
+    .suggest-block textarea {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      font-size: 14px;
+      font-family: inherit;
+      margin-top: 10px;
+      resize: vertical;
+      box-sizing: border-box;
+    }
+  </style>
+</head>
+<body>
+
+<!-- ЭКРАН 1: МЕНЮ -->
+<div id="screen-menu" class="screen active">
+  <div class="page-header">📋 Управление заявками</div>
+  <div class="menu-wrap">
+    <button class="menu-btn primary"   id="btn-go-orders">📂 Мои заявки</button>
+    <button class="menu-btn secondary" id="btn-go-new">➕ Новая заявка</button>
+  </div>
+
+  <div class="dev-block">
+    <div class="dev-block-title">🚧 В разработке</div>
+    <ul class="dev-block-list">
+      <li>Автоформирование КС-2/КС-3</li>
+      <li>Обработка заявок обслуживания (документооборот)</li>
+      <li>Оплата счетов поставщиков</li>
+      <li>Статистика по кол-ву ошибок в документах по подрядчикам</li>
+    </ul>
+  </div>
+
+  <div class="suggest-block">
+    <button class="menu-btn secondary" id="btn-toggle-suggest">💡 Ваши предложения по доработке</button>
+    <div id="suggest-form" style="display:none;">
+      <textarea id="suggest-text" rows="4" placeholder="Опишите вашу идею или пожелание..."></textarea>
+      <button class="submit-btn" id="btn-send-suggest">Отправить</button>
+    </div>
+  </div>
+</div>
+
+<!-- ЭКРАН 2: МОИ ЗАЯВКИ -->
+<div id="screen-orders" class="screen">
+  <div class="page-header">📂 Мои заявки</div>
+  <button class="back-btn" id="back-from-orders">← Назад</button>
+  <div class="search-wrap">
+    <input type="text" id="searchInput" placeholder="🔍 Поиск по названию или ID...">
+  </div>
+  <div id="orders-list"><div class="loading-msg">⏳ Загрузка...</div></div>
+</div>
+
+<!-- ЭКРАН 3: НОВАЯ ЗАЯВКА -->
+<div id="screen-new" class="screen">
+  <div class="page-header">➕ Новая заявка</div>
+  <button class="back-btn" id="back-from-new">← Назад</button>
+
+  <div class="section-title">Тип оплаты</div>
+  <div class="type-buttons" id="payment-type-buttons">
+    <button type="button" class="btn" id="btn-status1">Предоплата<br>(Аванс)</button>
+    <button type="button" class="btn" id="btn-status2">Доплата<br>(остаток)</button>
+    <button type="button" class="btn" id="btn-status3">Оплата<br>(100%)</button>
+  </div>
+
+  <div id="doplata-block">
+    <div class="section-title">📎 Связанная заявка (предоплата)</div>
+    <select class="doplata-order-select" id="doplata-order-select">
+      <option value="">⏳ Загрузка заявок...</option>
+    </select>
+    <div class="linked-order-info" id="linked-order-info">
+      <div class="linked-title">📋 Информация о заявке</div>
+      <div id="linked-order-details"></div>
+      <a id="linked-order-link" href="#" target="_blank">📁 Открыть документы предоплаты</a>
+    </div>
+
+    <div class="checkbox-row">
+      <input type="checkbox" id="ds-need-checkbox">
+      <label for="ds-need-checkbox">Требуется доп. соглашение?</label>
+    </div>
+
+    <div id="ds-generate-block">
+      <div id="dg-meta-hint" class="meta-hint" style="display:none;">
+        ✅ Данные договора подставлены из предоплаты
+      </div>
+
+      <div class="form-group">
+        <label>Что меняется в ДС?</label>
+        <select id="dg-type">
+          <option value="И сроки и сумма">И сроки и сумма</option>
+          <option value="Только сроки">Только сроки</option>
+          <option value="Только сумма">Только сумма</option>
+        </select>
+      </div>
+
+      <div class="type-buttons" id="dg-nds-buttons">
+        <button type="button" class="btn active" id="dg-btn-nds">С НДС</button>
+        <button type="button" class="btn" id="dg-btn-nonds">Без НДС</button>
+      </div>
+      <div class="form-group" id="dg-nds-rate-group">
+        <label>Ставка НДС</label>
+        <select id="dg-nds-rate">
+          <option value="5">5%</option>
+          <option value="7">7%</option>
+          <option value="20">20%</option>
+          <option value="22" selected>22%</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>Подрядчик</label>
+        <select id="dg-contractor"><option value="">⏳ Загрузка...</option></select>
+      </div>
+      <div class="form-group">
+        <label>Наш подписант</label>
+        <select id="dg-signer"><option value="">⏳ Загрузка...</option></select>
+      </div>
+
+      <div class="form-group">
+        <label>№ Доп. соглашения</label>
+        <div id="dg-prev-num-hint" class="meta-hint" style="display:none;"></div>
+        <input type="text" id="dg-num">
+      </div>
+      <div class="form-group">
+        <label>Дата ДС</label>
+        <div id="dg-end-date-hint" class="meta-hint" style="display:none;"></div>
+        <input type="date" id="dg-date">
+      </div>
+      <div class="form-group"><label>№ Основного договора</label><input type="text" id="dg-main-num"></div>
+      <div class="form-group"><label>Дата Основного договора</label><input type="date" id="dg-main-date"></div>
+      <div class="form-group" id="dg-start-group"><label>Срок начала ремонта</label><input type="date" id="dg-start"></div>
+      <div class="form-group" id="dg-end-group"><label>Срок окончания ремонта</label><input type="date" id="dg-end"></div>
+      <div class="form-group" id="dg-price-group"><label>Итоговая сумма по ДС</label><input type="text" id="dg-price" placeholder="100 000"></div>
+      <div class="checkbox-row">
+        <input type="checkbox" id="dg-ks-checkbox" disabled>
+        <label for="dg-ks-checkbox"><s style="color:#c0392b;">Оформить КС-2/КС-3?</s> <span style="color:#c0392b;font-size:11px;">(в разработке)</span></label>
+      </div>
+    </div>
+  </div>
+
+  <div id="work-variant-block">
+    <div class="section-title">Вариант исполнения</div>
+    <div class="meta-hint" id="work-variant-meta-hint" style="display:none;"></div>
+    <div class="type-buttons" id="work-variant-buttons">
+      <button type="button" class="btn" id="btn-work-izh">Иждивение</button>
+      <button type="button" class="btn" id="btn-work-dav">Давальческое</button>
+    </div>
+    <div class="form-group" id="m15-group" style="display:none;">
+      <label>М-15</label>
+      <select id="i-m15">
+        <option value="">Не выбрано</option>
+        <option value="Есть">Есть</option>
+        <option value="Нет">Нет</option>
+      </select>
+    </div>
+  </div>
+
+  <div id="contract-block">
+    <div class="section-title">Договор</div>
+    <div class="type-buttons">
+      <button type="button" class="btn active" id="contract-mode-upload">📎 Загрузить файл</button>
+      <button type="button" class="btn" id="contract-mode-generate">📝 Сформировать в боте</button>
+    </div>
+
+    <div id="contract-upload-part">
+      <div style="font-size:12px;color:#777;">Файл договора добавьте в общую загрузку документов ниже.</div>
+    </div>
+
+    <div id="contract-generate-part" style="display:none;">
+      <div class="type-buttons">
+        <button type="button" class="btn active" id="cg-btn-nds">С НДС</button>
+        <button type="button" class="btn" id="cg-btn-nonds">Без НДС</button>
+      </div>
+      <div class="form-group" id="cg-nds-rate-group">
+        <label>Ставка НДС</label>
+        <select id="cg-nds-rate">
+          <option value="5">5%</option>
+          <option value="7">7%</option>
+          <option value="20">20%</option>
+          <option value="22" selected>22%</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Вид работ</label>
+        <select id="cg-work-kind">
+          <option value="Строительно-монтажные работы">Строительно-монтажные работы</option>
+          <option value="Электромонтажные работы">Электромонтажные работы</option>
+          <option value="Слаботочные работы">Слаботочные работы</option>
+          <option value="Замеры помещения">Замеры помещения</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Подрядчик (для договора)</label>
+        <select id="cg-contractor"><option value="">⏳ Загрузка...</option></select>
+      </div>
+      <div class="form-group">
+        <label>Наш подписант</label>
+        <select id="cg-signer"><option value="">⏳ Загрузка...</option></select>
+      </div>
+      <div class="form-group"><label>№ договора</label><input type="text" id="cg-num"></div>
+      <div class="form-group"><label>Дата договора</label><input type="date" id="cg-date"></div>
+      <div class="form-group"><label>Адрес объекта</label><input type="text" id="cg-addr"></div>
+      <div class="form-group"><label>Начало работ</label><input type="date" id="cg-start"></div>
+      <div class="form-group"><label>Конец работ</label><input type="date" id="cg-end"></div>
+      <div class="form-group"><label>Сумма ИТОГО</label><input type="text" id="cg-price" placeholder="100 000"></div>
+      <div class="form-group"><label>Аванс %</label><input type="text" id="cg-adv" value="30"></div>
+      <div class="checkbox-row" id="cg-ks-row" style="display:none;">
+        <input type="checkbox" id="cg-ks-checkbox" disabled>
+        <label for="cg-ks-checkbox"><s style="color:#c0392b;">Оформить КС-2/КС-3?</s> <span style="color:#c0392b;font-size:11px;">(в разработке)</span></label>
+      </div>
+    </div>
+  </div>
+
+  <form id="megaForm">
+    <div id="form-fields" class="form-box">
+      <div class="form-group">
+        <label>Подрядчик *</label>
+        <input type="text" id="contractor" placeholder="Наименование подрядчика" required>
+      </div>
+      <div class="form-group">
+        <label>Филиал *</label>
+        <input type="text" id="branch" placeholder="Название филиала" required>
+      </div>
+      <div class="form-group">
+        <label>📎 Документы (можно выбрать сразу несколько файлов)</label>
+        <input type="file" id="mass-files" multiple>
+      </div>
+      <button type="submit" class="submit-btn" id="submit-new">📤 Отправить заявку</button>
+    </div>
+  </form>
+</div>
+
+<!-- ЭКРАН 4: ИСПРАВЛЕННЫЕ -->
+<div id="screen-fix" class="screen">
+  <div class="page-header" id="fix-page-header">📎 Исправленные документы</div>
+  <button class="back-btn" id="back-from-fix">← Назад к заявкам</button>
+  <div class="fix-banner">Заявка № <strong id="fix-order-id-text"></strong></div>
+  <form id="fixForm">
+    <div class="form-box active">
+      <div class="form-group">
+        <label>📎 Файлы (можно выбрать сразу несколько)</label>
+        <input type="file" id="fi-files" multiple>
+      </div>
+      <button type="submit" class="submit-btn" id="fix-submit-btn">📤 Загрузить исправленные</button>
+    </div>
+  </form>
+</div>
+
+<script>
+// ===== TELEGRAM =====
+let tg = null;
+try {
+  if (window.Telegram && window.Telegram.WebApp) {
+    tg = window.Telegram.WebApp;
+    tg.ready();
+    tg.expand();
+  }
+} catch(e) {}
+
+let tgId = 'TEST_USER';
+let tgUsername = '';
+try {
+  if (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) {
+    tgId       = tg.initDataUnsafe.user.id.toString();
+    tgUsername = tg.initDataUnsafe.user.username || '';
+  }
+} catch(e) {}
+
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwyu12Esfnkq_CKmUtCp8jOD9VwZaNwpzCpvH3ZqJzqsyr914YdIOlgBpwZywd_gYLliQ/exec';
+
+// Безопасный alert — стандартный браузерный showAlert() иногда "подвешивает"
+// ввод в Telegram Mini App после закрытия; showAlert от Telegram лишён этой проблемы
+function showAlert(msg) {
+  try {
+    if (tg && typeof tg.showAlert === 'function') {
+      tg.showAlert(msg);
+      return;
+    }
+  } catch(e) {}
+  alert(msg);
+}
+
+let currentMain       = '';
+let currentSub        = ''; // 'иждивение' / 'давальческое' — единый вариант исполнения на всю форму
+let currentFixOrderId = '';
+let cachedOrders      = [];
+let currentLinkedContractMeta = null;
+
+// ===== ЭКРАНЫ =====
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(function(s) { s.classList.remove('active'); });
+  document.getElementById(id).classList.add('active');
+  window.scrollTo(0, 0);
+}
+
+// ===== НАВИГАЦИЯ =====
+document.getElementById('btn-go-orders').addEventListener('click', function() {
+  showScreen('screen-orders');
+  loadOrders();
+});
+document.getElementById('btn-go-new').addEventListener('click', function() {
+  showScreen('screen-new');
+});
+document.getElementById('back-from-orders').addEventListener('click', function() {
+  showScreen('screen-menu');
+});
+document.getElementById('back-from-new').addEventListener('click', function() {
+  showScreen('screen-menu');
+});
+document.getElementById('back-from-fix').addEventListener('click', function() {
+  showScreen('screen-orders');
+  loadOrders();
+});
+
+// ===== ПРЕДЛОЖЕНИЯ ПО ДОРАБОТКЕ =====
+document.getElementById('btn-toggle-suggest').addEventListener('click', function() {
+  var form = document.getElementById('suggest-form');
+  form.style.display = (form.style.display === 'none') ? 'block' : 'none';
+});
+
+document.getElementById('btn-send-suggest').addEventListener('click', async function() {
+  var text = document.getElementById('suggest-text').value.trim();
+  if (!text) { showAlert('Введите текст предложения!'); return; }
+
+  var btn = this;
+  btn.disabled = true;
+  btn.textContent = 'Отправка...';
+
+  try {
+    await fetch(SCRIPT_URL, {
+      method: 'POST',
+      mode: 'no-cors',
+      body: JSON.stringify({ mode: 'submitSuggestion', tg_id: tgId, tg_username: tgUsername, text: text })
+    });
+    showAlert('✅ Спасибо! Предложение отправлено.');
+    document.getElementById('suggest-text').value = '';
+    document.getElementById('suggest-form').style.display = 'none';
+  } catch(err) {
+    showAlert('❌ Ошибка отправки: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Отправить';
+  }
+});
+
+// ===== ТИП ОПЛАТЫ =====
+document.getElementById('btn-status1').addEventListener('click', function() { selectMain('status1'); });
+document.getElementById('btn-status2').addEventListener('click', function() { selectMain('status2'); });
+document.getElementById('btn-status3').addEventListener('click', function() { selectMain('status3'); });
+
+function selectMain(type) {
+  currentMain = type;
+  currentSub  = '';
+  currentLinkedContractMeta = null;
+
+  document.querySelectorAll('#payment-type-buttons .btn').forEach(function(b) { b.classList.remove('active'); });
+  document.getElementById('btn-' + type).classList.add('active');
+
+  document.getElementById('doplata-block').style.display      = 'none';
+  document.getElementById('linked-order-info').style.display  = 'none';
+  document.getElementById('contract-block').style.display     = 'none';
+  document.getElementById('work-variant-block').style.display = 'none';
+  document.getElementById('m15-group').style.display           = 'none';
+  document.getElementById('i-m15').value = '';
+  resetWorkVariantButtons();
+  resetDsGenerateCheckbox();
+  document.getElementById('form-fields').classList.remove('active');
+  document.getElementById('cg-ks-row').style.display = (type === 'status3') ? 'flex' : 'none';
+  document.getElementById('cg-ks-checkbox').checked = false;
+
+  if (type === 'status1') {
+    document.getElementById('work-variant-block').style.display = 'block';
+    document.getElementById('contract-block').style.display     = 'block';
+    loadDocMeta('cg-contractor', 'cg-signer');
+    document.getElementById('form-fields').classList.add('active');
+  } else if (type === 'status2') {
+    document.getElementById('doplata-block').style.display      = 'block';
+    document.getElementById('work-variant-block').style.display = 'block';
+    loadDoplataOrders();
+    document.getElementById('form-fields').classList.add('active');
+  } else if (type === 'status3') {
+    document.getElementById('work-variant-block').style.display = 'block';
+    document.getElementById('contract-block').style.display     = 'block';
+    loadDocMeta('cg-contractor', 'cg-signer');
+    document.getElementById('form-fields').classList.add('active');
+  }
+}
+
+// ===== ВАРИАНТ ИСПОЛНЕНИЯ (единый переключатель на форму) =====
+function resetWorkVariantButtons() {
+  document.querySelectorAll('#work-variant-buttons .btn').forEach(function(b){ b.classList.remove('active'); });
+  document.getElementById('work-variant-buttons').style.display = 'flex';
+  document.getElementById('work-variant-meta-hint').style.display = 'none';
+}
+
+document.getElementById('btn-work-izh').addEventListener('click', function(){ selectWorkVariant('иждивение'); });
+document.getElementById('btn-work-dav').addEventListener('click', function(){ selectWorkVariant('давальческое'); });
+
+function selectWorkVariant(variant) {
+  currentSub = variant;
+  document.querySelectorAll('#work-variant-buttons .btn').forEach(function(b){ b.classList.remove('active'); });
+  document.getElementById(variant === 'иждивение' ? 'btn-work-izh' : 'btn-work-dav').classList.add('active');
+  var showM15 = variant === 'давальческое' && currentMain !== 'status1';
+  document.getElementById('m15-group').style.display = showM15 ? 'block' : 'none';
+}
+
+// ===== ЗАГРУЗКА ЗАЯВОК ДЛЯ ДОПЛАТЫ =====
+async function loadDoplataOrders() {
+  var select = document.getElementById('doplata-order-select');
+  select.innerHTML = '<option value="">⏳ Загрузка...</option>';
+  try {
+    var payload = { mode: 'getOrders', tg_id: tgId, tg_username: tgUsername };
+    var resp    = await fetch(SCRIPT_URL + '?data=' + encodeURIComponent(JSON.stringify(payload)));
+    var result  = await resp.json();
+    cachedOrders = result.orders || [];
+
+    // Показываем и предоплаты, и уже доплаченные заявки — к одному договору
+    // может быть несколько ДС подряд, после первого статус меняется на "доплата"
+    var predoplaty = cachedOrders.filter(function(o) {
+      return (
+        o.paymentType === 'предоплата' || o.paymentType === 'status1' ||
+        o.paymentType === 'доплата'    || o.paymentType === 'status2'
+      );
+    });
+
+    select.innerHTML = '<option value="__none__">— Не связанная заявка —</option>';
+
+    predoplaty.forEach(function(order) {
+      var opt = document.createElement('option');
+      opt.value = order.id;
+      opt.textContent = '№' + order.id + ' | ' + (order.contractor || '—') + ' | ' + (order.branch || '—') + ' | ' + (order.date || '');
+      select.appendChild(opt);
+    });
+
+  } catch(err) {
+    select.innerHTML = '<option value="none">— Не связанная заявка —</option>';
+  }
+}
+
+// ===== ВЫБОР СВЯЗАННОЙ ЗАЯВКИ =====
+document.getElementById('doplata-order-select').addEventListener('change', function() {
+  var selectedId = this.value;
+  var infoBlock  = document.getElementById('linked-order-info');
+  var details    = document.getElementById('linked-order-details');
+  var link       = document.getElementById('linked-order-link');
+
+  if (!selectedId || selectedId === 'none' || selectedId === '__none__') {
+    infoBlock.style.display = 'none';
+    document.getElementById('contractor').value = '';
+    document.getElementById('branch').value     = '';
+    currentLinkedContractMeta = null;
+    currentSub = '';
+    resetWorkVariantButtons();
+    document.getElementById('m15-group').style.display = 'none';
+    document.getElementById('dg-prev-num-hint').style.display = 'none';
+    document.getElementById('dg-end-date-hint').style.display = 'none';
+    return;
+  }
+
+  var order = cachedOrders.find(function(o) { return o.id === selectedId; });
+  if (!order) { infoBlock.style.display = 'none'; currentLinkedContractMeta = null; return; }
+
+  details.innerHTML =
+    '<b>ID:</b> ' + order.id + '<br>' +
+    '<b>Подрядчик:</b> ' + (order.contractor || '—') + '<br>' +
+    '<b>Филиал:</b> '    + (order.branch     || '—') + '<br>' +
+    '<b>Дата:</b> '      + (order.date        || '—');
+
+  if (order.folderUrl) {
+    link.href = order.folderUrl;
+    link.style.display = 'inline-block';
+  } else {
+    link.style.display = 'none';
+  }
+
+  infoBlock.style.display = 'block';
+  document.getElementById('contractor').value = order.contractor || '';
+  document.getElementById('branch').value     = order.branch     || '';
+
+  var prevHint = document.getElementById('dg-prev-num-hint');
+  if (order.lastDsNum) {
+    prevHint.textContent = 'Предыдущий номер ДС: ' + order.lastDsNum;
+    prevHint.style.display = 'block';
+  } else {
+    prevHint.style.display = 'none';
+  }
+
+  currentLinkedContractMeta = order.contractMeta || null;
+
+  var endDateHint = document.getElementById('dg-end-date-hint');
+  if (currentLinkedContractMeta && currentLinkedContractMeta.endDate) {
+    endDateHint.textContent = 'Дата окончания ремонта по договору: ' + currentLinkedContractMeta.endDate;
+    endDateHint.style.display = 'block';
+  } else {
+    endDateHint.style.display = 'none';
+  }
+
+  if (currentLinkedContractMeta && currentLinkedContractMeta.workType) {
+    var mapped = currentLinkedContractMeta.workType === 'Давальческие' ? 'давальческое' : 'иждивение';
+    currentSub = mapped;
+    document.getElementById('work-variant-buttons').style.display = 'none';
+    var hint = document.getElementById('work-variant-meta-hint');
+    hint.style.display = 'block';
+    hint.textContent = '✅ Определено по предоплате: ' + (mapped === 'давальческое' ? 'Давальческое' : 'Иждивение');
+    document.getElementById('m15-group').style.display = mapped === 'давальческое' ? 'block' : 'none';
+  } else {
+    currentSub = '';
+    resetWorkVariantButtons();
+    document.getElementById('m15-group').style.display = 'none';
+  }
+});
+
+// ===== ДС В ДОПЛАТЕ: ЧЕКБОКС "ТРЕБУЕТСЯ ДОП. СОГЛАШЕНИЕ?" =====
+function resetDsGenerateCheckbox() {
+  var chk = document.getElementById('ds-need-checkbox');
+  chk.checked = false;
+  document.getElementById('ds-generate-block').style.display = 'none';
+  document.getElementById('dg-meta-hint').style.display = 'none';
+}
+
+document.getElementById('ds-need-checkbox').addEventListener('change', async function() {
+  var block = document.getElementById('ds-generate-block');
+  if (this.checked) {
+    block.style.display = 'block';
+    await loadDocMeta('dg-contractor', 'dg-signer');
+
+    if (currentLinkedContractMeta) {
+      if (currentLinkedContractMeta.contractorKey) {
+        document.getElementById('dg-contractor').value = currentLinkedContractMeta.contractorKey;
+      }
+      if (currentLinkedContractMeta.signerKey) {
+        document.getElementById('dg-signer').value = currentLinkedContractMeta.signerKey;
+      }
+      if (currentLinkedContractMeta.docNum)  document.getElementById('dg-main-num').value  = currentLinkedContractMeta.docNum;
+      if (currentLinkedContractMeta.docDate) document.getElementById('dg-main-date').value = ruDateToIso(currentLinkedContractMeta.docDate);
+
+      if (currentLinkedContractMeta.nds === 'Без НДС') {
+        document.getElementById('dg-btn-nonds').click();
+      } else {
+        document.getElementById('dg-btn-nds').click();
+        if (currentLinkedContractMeta.ndsRate) document.getElementById('dg-nds-rate').value = currentLinkedContractMeta.ndsRate;
+      }
+
+      document.getElementById('dg-meta-hint').style.display = 'block';
+    }
+  } else {
+    block.style.display = 'none';
+  }
+});
+
+document.getElementById('dg-contractor').addEventListener('change', function() {
+  if (this.value) document.getElementById('contractor').value = this.value;
+});
+
+var dgNds = 'С НДС';
+document.getElementById('dg-btn-nds').addEventListener('click', function() {
+  dgNds = 'С НДС';
+  document.getElementById('dg-btn-nds').classList.add('active');
+  document.getElementById('dg-btn-nonds').classList.remove('active');
+  if (document.getElementById('dg-type').value !== 'Только сроки') {
+    document.getElementById('dg-nds-rate-group').style.display = 'block';
+  }
+});
+document.getElementById('dg-btn-nonds').addEventListener('click', function() {
+  dgNds = 'Без НДС';
+  document.getElementById('dg-btn-nonds').classList.add('active');
+  document.getElementById('dg-btn-nds').classList.remove('active');
+  document.getElementById('dg-nds-rate-group').style.display = 'none';
+});
+document.getElementById('dg-type').addEventListener('change', function() {
+  var dsType = this.value;
+  var showDates = dsType !== 'Только сумма';
+  var showPrice = dsType !== 'Только сроки';
+
+  document.getElementById('dg-start-group').style.display = showDates ? 'block' : 'none';
+  document.getElementById('dg-end-group').style.display   = showDates ? 'block' : 'none';
+  document.getElementById('dg-price-group').style.display = showPrice ? 'block' : 'none';
+  document.getElementById('dg-nds-rate-group').style.display =
+    (showPrice && dgNds === 'С НДС') ? 'block' : 'none';
+});
+
+// ===== ДОГОВОР (для Предоплаты и Оплаты100): ПЕРЕКЛЮЧАТЕЛЬ РЕЖИМА =====
+var contractGenerateMode = false;
+
+document.getElementById('contract-mode-upload').addEventListener('click', function() {
+  contractGenerateMode = false;
+  document.getElementById('contract-mode-upload').classList.add('active');
+  document.getElementById('contract-mode-generate').classList.remove('active');
+  document.getElementById('contract-upload-part').style.display = 'block';
+  document.getElementById('contract-generate-part').style.display = 'none';
+});
+document.getElementById('contract-mode-generate').addEventListener('click', function() {
+  contractGenerateMode = true;
+  document.getElementById('contract-mode-generate').classList.add('active');
+  document.getElementById('contract-mode-upload').classList.remove('active');
+  document.getElementById('contract-upload-part').style.display = 'none';
+  document.getElementById('contract-generate-part').style.display = 'block';
+});
+
+document.getElementById('cg-contractor').addEventListener('change', function() {
+  if (this.value) document.getElementById('contractor').value = this.value;
+});
+
+var cgNds = 'С НДС';
+document.getElementById('cg-btn-nds').addEventListener('click', function() {
+  cgNds = 'С НДС';
+  document.getElementById('cg-btn-nds').classList.add('active');
+  document.getElementById('cg-btn-nonds').classList.remove('active');
+  document.getElementById('cg-nds-rate-group').style.display = 'block';
+});
+document.getElementById('cg-btn-nonds').addEventListener('click', function() {
+  cgNds = 'Без НДС';
+  document.getElementById('cg-btn-nonds').classList.add('active');
+  document.getElementById('cg-btn-nds').classList.remove('active');
+  document.getElementById('cg-nds-rate-group').style.display = 'none';
+});
+
+// ===== КОНВЕРТАЦИЯ ДАТ: ISO (из <input type="date">) ↔ РУССКИЙ ФОРМАТ (для документов) =====
+function formatDateRu(isoDate) {
+  if (!isoDate) return '';
+  var parts = isoDate.split('-'); // yyyy-mm-dd
+  if (parts.length !== 3) return isoDate;
+  var d = parseInt(parts[2], 10);
+  return d + '.' + parts[1] + '.' + parts[0];
+}
+
+function ruDateToIso(ruStr) {
+  if (!ruStr) return '';
+  var parts = ruStr.trim().split('.');
+  if (parts.length !== 3) return '';
+  var d = parts[0].padStart(2, '0');
+  var m = parts[1].padStart(2, '0');
+  var y = parts[2];
+  return y + '-' + m + '-' + d;
+}
+
+// ===== ДЕНЕЖНЫЙ ФОРМАТ ПОЛЕЙ СУММЫ =====
+function attachMoneyFormatting(inputId) {
+  var el = document.getElementById(inputId);
+  if (!el) return;
+  el.addEventListener('input', function() {
+    var raw = this.value.replace(/\s/g, '');
+    raw = raw.replace(/[^\d.,]/g, ''); // оставляем только цифры и разделители
+
+    var sepMatch = raw.match(/[.,]/);
+    var intPart, decPart, hasSep;
+
+    if (!sepMatch) {
+      intPart = raw;
+      decPart = '';
+      hasSep = false;
+    } else {
+      var sepIndex = sepMatch.index;
+      intPart = raw.slice(0, sepIndex).replace(/[.,]/g, '');
+      decPart = raw.slice(sepIndex + 1).replace(/[.,]/g, '').slice(0, 2);
+      hasSep = true;
+    }
+
+    if (!intPart && !hasSep) { this.value = ''; return; }
+
+    intPart = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+    this.value = intPart + (hasSep ? ',' + decPart : '');
+  });
+}
+attachMoneyFormatting('cg-price');
+attachMoneyFormatting('dg-price');
+
+// ===== ФАЙЛ → BASE64 =====
+function readFile(inputId) {
+  return new Promise(function(resolve) {
+    var input = document.getElementById(inputId);
+    if (!input || !input.files || !input.files[0]) return resolve({ data: null, name: '' });
+    var reader = new FileReader();
+    reader.onload  = function(e) { resolve({ data: e.target.result, name: input.files[0].name }); };
+    reader.onerror = function()  { resolve({ data: null, name: '' }); };
+    reader.readAsDataURL(input.files[0]);
+  });
+}
+
+// ===== МАССОВОЕ ЧТЕНИЕ НЕСКОЛЬКИХ ФАЙЛОВ =====
+function readMassFiles(inputId) {
+  return new Promise(function(resolve) {
+    var input = document.getElementById(inputId);
+    if (!input || !input.files || !input.files.length) return resolve([]);
+    var files = Array.prototype.slice.call(input.files);
+    var promises = files.map(function(file) {
+      return new Promise(function(res) {
+        var reader = new FileReader();
+        reader.onload  = function(e) { res({ data: e.target.result, name: file.name }); };
+        reader.onerror = function()  { res(null); };
+        reader.readAsDataURL(file);
+      });
+    });
+    Promise.all(promises).then(function(results) {
+      resolve(results.filter(function(r) { return r !== null; }));
+    });
+  });
+}
+
+// ===== БЕЙДЖ СТАТУСА =====
+function getStatusBadge(value) {
+  if (!value) return '<span class="badge-plain">—</span>';
+  var v = value.toString().toLowerCase().trim();
+
+  if (v === 'оплачено')  return '<span class="badge badge-green">' + value + '</span>';
+  if (v === 'закрыты')   return '<span class="badge badge-green">' + value + '</span>';
+  if (v === 'получено')  return '<span class="badge badge-green">' + value + '</span>';
+  if (v === 'да' || v === 'есть' || v === 'подписан' || v === 'готово' || v === 'норм')
+    return '<span class="badge badge-green">' + value + '</span>';
+
+  if (v === 'в очереди на оплату') return '<span class="badge badge-blue">' + value + '</span>';
+  if (v === 'в работе' || v === 'в процессе') return '<span class="badge badge-blue">' + value + '</span>';
+  if (v === 'ждем трек номер') return '<span class="badge badge-blue">' + value + '</span>';
+  if (v === 'азат проверил') return '<span class="badge badge-blue">' + value + '</span>';
+  if (v === 'ожидание отчета') return '<span class="badge badge-blue">' + value + '</span>';
+
+  if (v === 'на согласовании') return '<span class="badge badge-yellow">' + value + '</span>';
+  if (v === 'на исправлении') return '<span class="badge badge-yellow">' + value + '</span>';
+  if (v === 'в закреплении') return '<span class="badge badge-yellow">' + value + '</span>';
+  if (v === 'ожид ориг') return '<span class="badge badge-yellow">' + value + '</span>';
+
+  if (v === 'ожидание оригинала/выгрузки' || v === 'ожидаем оригинал/выгрузки')
+    return '<span class="badge badge-purple">' + value + '</span>';
+
+  if (v === 'нет' || v === 'отсутствует') return '<span class="badge badge-orange">' + value + '</span>';
+
+  if (v === 'ждем счет') return '<span class="badge badge-red">' + value + '</span>';
+  if (v === 'отказ') return '<span class="badge badge-red">' + value + '</span>';
+  if (v === 'нет документа' || v === 'нет договора') return '<span class="badge badge-red">' + value + '</span>';
+  if (v === 'отличие суммы' || v === 'неверные реквизиты') return '<span class="badge badge-red">' + value + '</span>';
+  if (v === 'закрыты без док') return '<span class="badge badge-red">' + value + '</span>';
+
+  return '<span class="badge-plain">' + value + '</span>';
+}
+
+// ===== СТРОКА СТАТУСА =====
+function makeRow(label, value) {
+  return '<div class="status-row">' +
+    '<span class="status-label">' + (label || '') + '</span>' +
+    '<span class="status-value">' + getStatusBadge(value) + '</span>' +
+  '</div>';
+}
+
+// ===== ОТПРАВКА НОВОЙ ЗАЯВКИ =====
+document.getElementById('megaForm').addEventListener('submit', async function(e) {
+  e.preventDefault();
+
+  if (!currentMain) { showAlert('Выберите тип оплаты!'); return; }
+  if (!currentSub)  { showAlert('Выберите вариант исполнения!'); return; }
+
+  var linkedOrderId   = '';
+  var linkedFolderUrl = '';
+
+  if (currentMain === 'status2') {
+    var selectVal = document.getElementById('doplata-order-select').value;
+    if (!selectVal) { showAlert('Выберите заявку или "Не связанная заявка"!'); return; }
+
+    if (selectVal !== '__none__') {
+      linkedOrderId = selectVal;
+      var linkedOrder = cachedOrders.find(function(o) { return o.id === linkedOrderId; });
+      if (linkedOrder) linkedFolderUrl = linkedOrder.folderUrl || '';
+    }
+  }
+
+  if ((currentMain === 'status1' || currentMain === 'status3') && contractGenerateMode) {
+    if (!document.getElementById('cg-contractor').value) { showAlert('Выберите подрядчика для договора!'); return; }
+    if (!document.getElementById('cg-signer').value)      { showAlert('Выберите подписанта для договора!'); return; }
+    if (!document.getElementById('cg-num').value.trim())  { showAlert('Укажите номер договора!'); return; }
+
+    var cgDocDateVal   = document.getElementById('cg-date').value;
+    var cgStartDateVal = document.getElementById('cg-start').value;
+    if (cgDocDateVal && cgStartDateVal && cgDocDateVal > cgStartDateVal) {
+      showAlert('Дата договора не может быть позже даты начала работ!');
+      return;
+    }
+  }
+
+  var dsGenerateChecked = currentMain === 'status2' && document.getElementById('ds-need-checkbox').checked;
+  if (dsGenerateChecked) {
+    if (!document.getElementById('dg-contractor').value) { showAlert('Выберите подрядчика для ДС!'); return; }
+    if (!document.getElementById('dg-signer').value)      { showAlert('Выберите подписанта для ДС!'); return; }
+    if (!document.getElementById('dg-num').value.trim())  { showAlert('Укажите номер ДС!'); return; }
+
+    var dgDsDateVal = document.getElementById('dg-date').value;
+
+    if (dgDsDateVal && currentLinkedContractMeta && currentLinkedContractMeta.endDate) {
+      var mainEndIso = ruDateToIso(currentLinkedContractMeta.endDate);
+      if (mainEndIso && dgDsDateVal > mainEndIso) {
+        showAlert('Дата ДС не может быть позже даты окончания ремонта по основному договору!');
+        return;
+      }
+    }
+  }
+
+  var btn = document.getElementById('submit-new');
+  btn.disabled    = true;
+  btn.textContent = '⏳ Отправка...';
+
+  try {
+    var massFiles = await readMassFiles('mass-files');
+    var m15 = document.getElementById('i-m15') ? document.getElementById('i-m15').value : '';
+
+    var payload = {
+      mode: 'new',
+      tg_id: tgId,
+      tg_username: tgUsername,
+      paymentType: currentMain,
+      subType: currentSub,
+      contractor: document.getElementById('contractor').value.trim(),
+      branch:     document.getElementById('branch').value.trim(),
+      m15: m15,
+      linkedOrderId: linkedOrderId,
+      linkedFolderUrl: linkedFolderUrl,
+      massFiles: massFiles
+    };
+
+    if ((currentMain === 'status1' || currentMain === 'status3') && contractGenerateMode) {
+      payload.contractGenerate  = true;
+      payload.contractWorkType  = currentSub === 'давальческое' ? 'Давальческие' : 'Иждивение';
+      payload.contractNds       = cgNds;
+      payload.contractNdsRate   = document.getElementById('cg-nds-rate').value;
+      payload.contractorKey     = document.getElementById('cg-contractor').value;
+      payload.signerKey         = document.getElementById('cg-signer').value;
+      payload.contractWorkKind  = document.getElementById('cg-work-kind').value;
+      payload.contractDocNum    = document.getElementById('cg-num').value.trim();
+      payload.contractDocDate   = formatDateRu(document.getElementById('cg-date').value);
+      payload.contractAddr      = document.getElementById('cg-addr').value.trim();
+      payload.contractStart     = formatDateRu(document.getElementById('cg-start').value);
+      payload.contractEnd       = formatDateRu(document.getElementById('cg-end').value);
+      payload.contractPrice     = document.getElementById('cg-price').value.trim();
+      payload.contractAdv       = document.getElementById('cg-adv').value.trim();
+      payload.ksGenerate        = (currentMain === 'status3') && document.getElementById('cg-ks-checkbox').checked;
+    }
+
+    if (dsGenerateChecked) {
+      payload.dsGenerate         = true;
+      payload.dsGenWork          = currentSub === 'давальческое' ? 'Давальческое' : 'Иждивение';
+      payload.dsGenType          = document.getElementById('dg-type').value;
+      payload.dsGenNds           = dgNds;
+      payload.dsGenNdsRate       = document.getElementById('dg-nds-rate').value;
+      payload.dsGenContractorKey = document.getElementById('dg-contractor').value;
+      payload.dsGenSignerKey     = document.getElementById('dg-signer').value;
+      payload.dsGenNum           = document.getElementById('dg-num').value.trim();
+      payload.dsGenDate          = formatDateRu(document.getElementById('dg-date').value);
+      payload.dsGenMainNum       = document.getElementById('dg-main-num').value.trim();
+      payload.dsGenMainDate      = formatDateRu(document.getElementById('dg-main-date').value);
+      payload.dsGenStart         = formatDateRu(document.getElementById('dg-start').value);
+      payload.dsGenEnd           = formatDateRu(document.getElementById('dg-end').value);
+      payload.dsGenPrice         = document.getElementById('dg-price').value.trim();
+      payload.ksGenerate         = document.getElementById('dg-ks-checkbox').checked;
+    }
+
+    await fetch(SCRIPT_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify(payload) });
+
+    showAlert('✅ Заявка отправлена!\n\nПроверьте Telegram — придёт подтверждение с номером заявки.');
+    this.reset();
+    document.getElementById('form-fields').classList.remove('active');
+    document.getElementById('doplata-block').style.display      = 'none';
+    document.getElementById('linked-order-info').style.display  = 'none';
+    document.getElementById('contract-block').style.display     = 'none';
+    document.getElementById('work-variant-block').style.display = 'none';
+    document.getElementById('contract-upload-part').style.display = 'block';
+    document.getElementById('contract-generate-part').style.display = 'none';
+    document.getElementById('contract-mode-upload').classList.add('active');
+    document.getElementById('contract-mode-generate').classList.remove('active');
+    contractGenerateMode = false;
+    document.getElementById('cg-ks-checkbox').checked = false;
+    document.getElementById('cg-ks-row').style.display = 'none';
+    document.getElementById('dg-ks-checkbox').checked = false;
+    resetDsGenerateCheckbox();
+    resetWorkVariantButtons();
+    document.querySelectorAll('.btn').forEach(function(b) { b.classList.remove('active'); });
+    currentMain = ''; currentSub = ''; currentLinkedContractMeta = null;
+    showScreen('screen-menu');
+
+  } catch(err) {
+    showAlert('❌ Ошибка отправки: ' + err.message);
+  } finally {
+    btn.disabled    = false;
+    btn.textContent = '📤 Отправить заявку';
+  }
+});
+
+// ===== ЗАГРУЗКА ЗАЯВОК =====
+async function loadOrders() {
+  var list = document.getElementById('orders-list');
+  list.innerHTML = '<div class="loading-msg">⏳ Загрузка заявок...</div>';
+  document.getElementById('searchInput').value = '';
+  var url = SCRIPT_URL + '?data=' + encodeURIComponent(JSON.stringify({ mode: 'getOrders', tg_id: tgId, tg_username: tgUsername }));
+  try {
+    var resp = await fetch(url);
+    var text = await resp.text();
+    var result;
+    try {
+      result = JSON.parse(text);
+    } catch(parseErr) {
+      list.innerHTML = '<div class="empty-msg">❌ Ответ сервера:<br><small style="word-break:break-all;">' + text.substring(0, 300) + '</small></div>';
+      return;
+    }
+    cachedOrders = result.orders || [];
+    if (!cachedOrders || cachedOrders.length === 0) {
+      list.innerHTML = '<div class="empty-msg">📭 Заявок пока нет<br><small>curator: ' + (result.curator || 'пусто') + '</small></div>';
+      return;
+    }
+    renderOrders(cachedOrders);
+  } catch(err) {
+    list.innerHTML = '<div class="empty-msg">❌ Ошибка: ' + err.message + '<br><small>URL: ' + url.substring(0, 100) + '...</small></div>';
+  }
+}
+
+// ===== РЕНДЕР КАРТОЧЕК =====
+function renderOrders(orders) {
+  var list = document.getElementById('orders-list');
+
+  if (!orders || orders.length === 0) {
+    list.innerHTML = '<div class="empty-msg">📭 Ничего не найдено</div>';
+    return;
+  }
+
+  list.innerHTML = '';
+  orders.slice().reverse().forEach(function(order) {
+    var card = document.createElement('div');
+    card.className = 'order-card';
+
+    var paymentLabel = order.paymentType || '—';
+    if (order.paymentType === 'status1' || order.paymentType === 'предоплата') paymentLabel = 'Предоплата (Аванс)';
+    if (order.paymentType === 'status2' || order.paymentType === 'доплата')    paymentLabel = 'Доплата (остаток)';
+    if (order.paymentType === 'status3' || order.paymentType === 'оплата100')  paymentLabel = 'Оплата (100%)';
+
+    var linkedBadge = '';
+    if (order.linkedOrderId) {
+      linkedBadge = ' <span style="background:#fff3cd;color:#856404;padding:2px 7px;' +
+        'border-radius:4px;font-size:11px;font-weight:bold;">🔗 Доплата к №' + order.linkedOrderId + '</span>';
+    }
+
+    var avansRows = '';
+    if (order.avans && order.avans.length > 0) {
+      order.avans.forEach(function(item) {
+        avansRows += makeRow(item.label, item.value);
+      });
+    }
+    var avansBlock = '';
+    if (avansRows) {
+      avansBlock =
+        '<div class="status-block">' +
+          '<div class="status-block-header avans">💰 Аванс</div>' +
+          avansRows +
+        '</div>';
+    }
+
+    var zakrRows = '';
+    if (order.zakr && order.zakr.length > 0) {
+      order.zakr.forEach(function(item) {
+        zakrRows += makeRow(item.label, item.value);
+      });
+    }
+    var zakrBlock = '';
+    if (zakrRows) {
+      zakrBlock =
+        '<div class="status-block">' +
+          '<div class="status-block-header zakr">📋 Закрытие затрат</div>' +
+          zakrRows +
+        '</div>';
+    }
+
+    var cardBody =
+      '<div class="order-card-body">' +
+        '<div class="order-id">ID: ' + order.id + ' | ' + (order.date || '') + (linkedBadge ? ' ' + linkedBadge : '') + '</div>' +
+        '<div class="order-name">' + (order.contractor || '—') + '</div>' +
+        '<div class="order-meta">' +
+          '<span>🏗 ' + (order.branch || '—') + '</span>' +
+          '<span>💰 ' + paymentLabel + (order.subType ? ' · ' + order.subType : '') + '</span>' +
+          (order.m15 ? '<span>📦 М-15: ' + order.m15 + '</span>' : '') +
+        '</div>' +
+      '</div>';
+
+    var footer =
+      '<div class="order-card-footer">' +
+        (order.folderUrl
+          ? '<a class="link-btn" href="' + order.folderUrl + '" target="_blank">📁 Документы</a>'
+          : '') +
+        (order.linkedFolderUrl
+          ? '<a class="link-btn gray" href="' + order.linkedFolderUrl + '" target="_blank">📂 Предоплата</a>'
+          : '') +
+        (order.fixFolderUrl
+          ? '<a class="link-btn green" href="' + order.fixFolderUrl + '" target="_blank">✅ Исправленные</a>'
+          : '') +
+        '<button class="link-btn orange fix-btn"' +
+          ' data-id="'      + order.id                  + '"' +
+          ' data-payment="' + (order.paymentType || '') + '"' +
+          ' data-m15="'     + (order.m15 || '')         + '">' +
+          (order.fixFolderUrl ? '🔄 Загрузить снова' : '⚠️ Исправленные') +
+        '</button>' +
+        '<button class="link-btn gray add-docs-btn" data-id="' + order.id + '">📎 Доп. документы</button>' +
+        '<button class="link-btn gray gm-toggle-btn" data-id="' + order.id + '">' +
+          '📝 ГМ' + (order.gm ? ' ✓' : '') +
+        '</button>' +
+      '</div>';
+
+    var gmValueEscaped = (order.gm || '').replace(/"/g, '&quot;');
+    var gmBlock =
+      '<div class="gm-block" id="gm-block-' + order.id + '" style="display:none;">' +
+        '<input type="text" class="gm-input" data-id="' + order.id + '" value="' + gmValueEscaped + '" placeholder="Введите текст ГМ">' +
+        '<button class="submit-btn gm-save-btn" data-id="' + order.id + '">Сохранить</button>' +
+      '</div>';
+
+    card.innerHTML = cardBody + avansBlock + zakrBlock + footer + gmBlock;
+    list.appendChild(card);
+  });
+
+  list.querySelectorAll('.fix-btn').forEach(function(b) {
+    b.addEventListener('click', function() {
+      openFixScreen(this.getAttribute('data-id'));
+    });
+  });
+
+  list.querySelectorAll('.add-docs-btn').forEach(function(b) {
+    b.addEventListener('click', function() {
+      openAddDocsScreen(this.getAttribute('data-id'));
+    });
+  });
+
+  list.querySelectorAll('.gm-toggle-btn').forEach(function(b) {
+    b.addEventListener('click', function() {
+      var id = this.getAttribute('data-id');
+      var block = document.getElementById('gm-block-' + id);
+      block.style.display = (block.style.display === 'none') ? 'block' : 'none';
+    });
+  });
+
+  list.querySelectorAll('.gm-save-btn').forEach(function(b) {
+    b.addEventListener('click', async function() {
+      var id = this.getAttribute('data-id');
+      var input = list.querySelector('.gm-input[data-id="' + id + '"]');
+      var text = input.value.trim();
+      var origText = this.textContent;
+      this.disabled = true;
+      this.textContent = 'Сохранение...';
+      try {
+        await fetch(SCRIPT_URL, {
+          method: 'POST',
+          mode: 'no-cors',
+          body: JSON.stringify({ mode: 'setGM', orderId: id, gmText: text })
+        });
+        showAlert('✅ Сохранено!');
+      } catch(err) {
+        showAlert('❌ Ошибка: ' + err.message);
+      } finally {
+        this.disabled = false;
+        this.textContent = origText;
+      }
+    });
+  });
+}
+
+// ===== ПОИСК =====
+document.getElementById('searchInput').addEventListener('input', function() {
+  var q = this.value.trim().toLowerCase();
+  if (!q) { renderOrders(cachedOrders); return; }
+  var filtered = cachedOrders.filter(function(o) {
+    return (
+      (o.id         && o.id.toString().toLowerCase().includes(q)) ||
+      (o.contractor && o.contractor.toLowerCase().includes(q))    ||
+      (o.branch     && o.branch.toLowerCase().includes(q))        ||
+      (o.date       && o.date.toLowerCase().includes(q))
+    );
+  });
+  renderOrders(filtered);
+});
+
+// ===== ЭКРАН ИСПРАВЛЕННЫХ =====
+var currentFixMode = 'fix'; // 'fix' или 'additional'
+
+function openFixScreen(orderId) {
+  currentFixOrderId = orderId;
+  currentFixMode = 'fix';
+  document.getElementById('fix-order-id-text').textContent = orderId;
+  document.getElementById('fix-page-header').textContent = '📎 Исправленные документы';
+  document.getElementById('fix-submit-btn').textContent = '📤 Загрузить исправленные';
+  showScreen('screen-fix');
+}
+
+function openAddDocsScreen(orderId) {
+  currentFixOrderId = orderId;
+  currentFixMode = 'additional';
+  document.getElementById('fix-order-id-text').textContent = orderId;
+  document.getElementById('fix-page-header').textContent = '📎 Дополнительные документы';
+  document.getElementById('fix-submit-btn').textContent = '📤 Загрузить дополнительные';
+  showScreen('screen-fix');
+}
+
+// ===== ОТПРАВКА ИСПРАВЛЕННЫХ / ДОПОЛНИТЕЛЬНЫХ =====
+document.getElementById('fixForm').addEventListener('submit', async function(e) {
+  e.preventDefault();
+
+  var isAdditional = currentFixMode === 'additional';
+  var btn = document.getElementById('fix-submit-btn');
+  btn.disabled    = true;
+  btn.textContent = '⏳ Загрузка...';
+
+  try {
+    var massFiles = await readMassFiles('fi-files');
+
+    var payload = {
+      mode: isAdditional ? 'addDocs' : 'fix',
+      tg_id: tgId,
+      tg_username: tgUsername,
+      orderId: currentFixOrderId,
+      massFiles: massFiles
+    };
+
+    await fetch(SCRIPT_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify(payload) });
+
+    showAlert(isAdditional
+      ? '✅ Дополнительные документы загружены!\n\nПроверьте Telegram.'
+      : '✅ Исправленные документы загружены!\n\nПроверьте Telegram.');
+    this.reset();
+    showScreen('screen-orders');
+    loadOrders();
+
+  } catch(err) {
+    showAlert('❌ Ошибка: ' + err.message);
+  } finally {
+    btn.disabled    = false;
+    btn.textContent = isAdditional ? '📤 Загрузить дополнительные' : '📤 Загрузить исправленные';
+  }
+});
+
+// ===== ЗАГРУЗКА СПИСКОВ ПОДРЯДЧИКОВ / ПОДПИСАНТОВ (общий кэш) =====
+var docMetaCache = null;
+async function loadDocMeta(contractorSelectId, signerSelectId) {
+  var contractorSelect = document.getElementById(contractorSelectId);
+  var signerSelect      = document.getElementById(signerSelectId);
+
+  if (docMetaCache) {
+    fillDocSelects(contractorSelect, signerSelect);
+    return;
+  }
+
+  try {
+    var payload = { mode: 'getDocMeta' };
+    var resp    = await fetch(SCRIPT_URL + '?data=' + encodeURIComponent(JSON.stringify(payload)));
+    var text    = await resp.text();
+    var result;
+    try {
+      result = JSON.parse(text);
+    } catch(parseErr) {
+      contractorSelect.innerHTML = '<option value="">❌ ' + text.substring(0, 60) + '</option>';
+      signerSelect.innerHTML     = '<option value="">❌ Не JSON-ответ</option>';
+      return;
+    }
+    docMetaCache = result;
+    fillDocSelects(contractorSelect, signerSelect);
+  } catch(err) {
+    contractorSelect.innerHTML = '<option value="">❌ ' + err.message + '</option>';
+    signerSelect.innerHTML     = '<option value="">❌ ' + err.message + '</option>';
+  }
+}
+
+function fillDocSelects(contractorSelect, signerSelect) {
+  if (!docMetaCache || docMetaCache.status !== 'ok') return;
+
+  contractorSelect.innerHTML = '<option value="">— Выберите подрядчика —</option>';
+  docMetaCache.contractors.forEach(function(c) {
+    var opt = document.createElement('option');
+    opt.value = c.key;
+    opt.textContent = c.display;
+    contractorSelect.appendChild(opt);
+  });
+
+  signerSelect.innerHTML = '<option value="">— Выберите подписанта —</option>';
+  docMetaCache.signers.forEach(function(s) {
+    var opt = document.createElement('option');
+    opt.value = s.key;
+    opt.textContent = s.display;
+    signerSelect.appendChild(opt);
+  });
+}
+</script>
+</body>
+</html>
