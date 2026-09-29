@@ -449,16 +449,54 @@ try {
   }
 } catch(e) {}
 
-let tgId = 'TEST_USER';
+let tgId = '';
 let tgUsername = '';
-try {
-  if (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) {
-    tgId       = tg.initDataUnsafe.user.id.toString();
-    tgUsername = tg.initDataUnsafe.user.username || '';
+
+function syncTelegramUser() {
+  try {
+    if (window.Telegram && window.Telegram.WebApp) {
+      tg = window.Telegram.WebApp;
+      tg.ready();
+      tg.expand();
+    }
+    var user = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
+    var nextId = user && user.id != null ? user.id.toString().trim() : '';
+    if (!/^\d+$/.test(nextId)) return false;
+
+    var previousId = tgId;
+    tgId = nextId;
+    tgUsername = user.username || '';
+    if (previousId && previousId !== tgId) invalidateOrdersCache();
+    return true;
+  } catch(e) {
+    return false;
   }
-} catch(e) {}
+}
+
+syncTelegramUser();
+
+function delay(ms) {
+  return new Promise(function(resolve) { setTimeout(resolve, ms); });
+}
+
+async function waitForTelegramUser() {
+  if (syncTelegramUser()) return;
+  for (var attempt = 0; attempt < 20; attempt++) {
+    await delay(100);
+    if (syncTelegramUser()) return;
+  }
+  throw new Error('Не удалось определить пользователя Telegram. Закройте окно и откройте бот заново через Telegram.');
+}
+
+async function ensureTelegramIdentity(payload) {
+  if (!payload || !Object.prototype.hasOwnProperty.call(payload, 'tg_id')) return;
+  await waitForTelegramUser();
+  payload.tg_id = tgId;
+  payload.tg_username = tgUsername;
+}
 
 const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwyu12Esfnkq_CKmUtCp8jOD9VwZaNwpzCpvH3ZqJzqsyr914YdIOlgBpwZywd_gYLliQ/exec';
+const GET_TIMEOUT_MS = 35000;
 
 // Безопасный alert — стандартный браузерный showAlert() иногда "подвешивает"
 // ввод в Telegram Mini App после закрытия; showAlert от Telegram лишён этой проблемы
@@ -478,14 +516,18 @@ function buildGetUrl(payload) {
 }
 
 async function fetchJsonGet(payload, attempts) {
+  await ensureTelegramIdentity(payload);
   var maxAttempts = attempts || 2;
   var lastError = null;
 
   for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+    var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    var timeoutId = controller ? setTimeout(function() { controller.abort(); }, GET_TIMEOUT_MS) : null;
     try {
       var resp = await fetch(buildGetUrl(payload), {
         method: 'GET',
-        cache: 'no-store'
+        cache: 'no-store',
+        signal: controller ? controller.signal : undefined
       });
       var text = await resp.text();
 
@@ -504,8 +546,14 @@ async function fetchJsonGet(payload, attempts) {
       }
       return result;
     } catch(err) {
+      if (err && err.name === 'AbortError') {
+        lastError = new Error('Сервер отвечает дольше 35 секунд. Нажмите «Повторить».');
+        break;
+      }
       lastError = err;
       if (attempt >= maxAttempts) break;
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
     }
   }
 
@@ -513,6 +561,7 @@ async function fetchJsonGet(payload, attempts) {
 }
 
 async function postJson(payload) {
+  await ensureTelegramIdentity(payload);
   var resp = await fetch(SCRIPT_URL + '?_ts=' + Date.now(), {
     method: 'POST',
     cache: 'no-store',
@@ -543,11 +592,13 @@ let currentLinkedContractMeta = null;
 let ordersCacheReady  = false;
 let ordersLoadedAt    = 0;
 let ordersLoadPromise = null;
+let ordersCacheTgId   = '';
 const ORDERS_CACHE_TTL_MS = 60000;
 
 function invalidateOrdersCache() {
   ordersCacheReady = false;
   ordersLoadedAt = 0;
+  ordersCacheTgId = '';
 }
 
 // ===== ЭКРАНЫ =====
@@ -669,13 +720,17 @@ async function loadDoplataOrders() {
   var select = document.getElementById('doplata-order-select');
   select.innerHTML = '<option value="">⏳ Загрузка...</option>';
   try {
-    var cacheFresh = ordersCacheReady && (Date.now() - ordersLoadedAt < ORDERS_CACHE_TTL_MS);
+    await waitForTelegramUser();
+    var cacheFresh = ordersCacheReady && ordersCacheTgId === tgId &&
+      (Date.now() - ordersLoadedAt < ORDERS_CACHE_TTL_MS);
     if (!cacheFresh) {
       var payload = { mode: 'getOrders', tg_id: tgId, tg_username: tgUsername };
       var result  = await fetchJsonGet(payload, 2);
+      if (!result.curator) throw new Error('Сервер не распознал пользователя. Обратитесь к администратору бота.');
       cachedOrders = result.orders || [];
       ordersCacheReady = true;
       ordersLoadedAt = Date.now();
+      ordersCacheTgId = tgId;
     }
 
     // Показываем и предоплаты, и уже доплаченные заявки — к одному договору
@@ -1151,7 +1206,8 @@ function loadOrders(forceReload) {
   var list = document.getElementById('orders-list');
   document.getElementById('searchInput').value = '';
 
-  var cacheFresh = ordersCacheReady && (Date.now() - ordersLoadedAt < ORDERS_CACHE_TTL_MS);
+  var cacheFresh = ordersCacheReady && /^\d+$/.test(tgId) && ordersCacheTgId === tgId &&
+    (Date.now() - ordersLoadedAt < ORDERS_CACHE_TTL_MS);
   if (!forceReload && cacheFresh) {
     renderOrders(cachedOrders);
     return Promise.resolve(cachedOrders);
@@ -1162,9 +1218,11 @@ function loadOrders(forceReload) {
   ordersLoadPromise = (async function() {
     try {
       var result = await fetchJsonGet({ mode: 'getOrders', tg_id: tgId, tg_username: tgUsername }, 2);
+      if (!result.curator) throw new Error('Сервер не распознал пользователя. Обратитесь к администратору бота.');
       cachedOrders = result.orders || [];
       ordersCacheReady = true;
       ordersLoadedAt = Date.now();
+      ordersCacheTgId = tgId;
       if (!cachedOrders || cachedOrders.length === 0) {
         list.innerHTML = '<div class="empty-msg">📭 Заявок пока нет<br><small>curator: ' + (result.curator || 'пусто') + '</small></div>';
         return cachedOrders;
@@ -1172,7 +1230,24 @@ function loadOrders(forceReload) {
       renderOrders(cachedOrders);
       return cachedOrders;
     } catch(err) {
-      list.innerHTML = '<div class="empty-msg">❌ Ошибка загрузки заявок:<br><small style="word-break:break-word;">' + err.message + '</small></div>';
+      list.innerHTML = '';
+      var errorBox = document.createElement('div');
+      errorBox.className = 'empty-msg';
+      errorBox.appendChild(document.createTextNode('❌ Ошибка загрузки заявок:'));
+      errorBox.appendChild(document.createElement('br'));
+      var details = document.createElement('small');
+      details.style.wordBreak = 'break-word';
+      details.textContent = err.message;
+      errorBox.appendChild(details);
+      errorBox.appendChild(document.createElement('br'));
+      var retryBtn = document.createElement('button');
+      retryBtn.type = 'button';
+      retryBtn.className = 'btn';
+      retryBtn.style.marginTop = '12px';
+      retryBtn.textContent = '🔄 Повторить';
+      retryBtn.addEventListener('click', function() { loadOrders(true); });
+      errorBox.appendChild(retryBtn);
+      list.appendChild(errorBox);
       return [];
     } finally {
       ordersLoadPromise = null;
