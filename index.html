@@ -1065,8 +1065,8 @@ document.getElementById('megaForm').addEventListener('submit', async function(e)
       payload.contractWorkType  = currentSub === 'давальческое' ? 'Давальческие' : 'Иждивение';
       payload.contractNds       = cgNds;
       payload.contractNdsRate   = document.getElementById('cg-nds-rate').value;
-      payload.contractorKey     = document.getElementById('cg-contractor').value;
-      payload.signerKey         = document.getElementById('cg-signer').value;
+      payload.contractorKey     = document.getElementById('cg-contractor').value.trim();
+      payload.signerKey         = document.getElementById('cg-signer').value.trim();
       payload.contractWorkKind  = document.getElementById('cg-work-kind').value;
       payload.contractDocNum    = document.getElementById('cg-num').value.trim();
       payload.contractDocDate   = formatDateRu(document.getElementById('cg-date').value);
@@ -1084,8 +1084,8 @@ document.getElementById('megaForm').addEventListener('submit', async function(e)
       payload.dsGenType          = document.getElementById('dg-type').value;
       payload.dsGenNds           = dgNds;
       payload.dsGenNdsRate       = document.getElementById('dg-nds-rate').value;
-      payload.dsGenContractorKey = document.getElementById('dg-contractor').value;
-      payload.dsGenSignerKey     = document.getElementById('dg-signer').value;
+      payload.dsGenContractorKey = document.getElementById('dg-contractor').value.trim();
+      payload.dsGenSignerKey     = document.getElementById('dg-signer').value.trim();
       payload.dsGenNum           = document.getElementById('dg-num').value.trim();
       payload.dsGenDate          = formatDateRu(document.getElementById('dg-date').value);
       payload.dsGenMainNum       = document.getElementById('dg-main-num').value.trim();
