@@ -479,13 +479,31 @@ function delay(ms) {
   return new Promise(function(resolve) { setTimeout(resolve, ms); });
 }
 
+function getTelegramDiagnostics() {
+  var sdkAvailable = !!(window.Telegram && window.Telegram.WebApp);
+  var webApp = sdkAvailable ? window.Telegram.WebApp : null;
+  var initDataLength = webApp && webApp.initData ? webApp.initData.length : 0;
+  var hashHasData = false;
+  try {
+    hashHasData = /(?:^#|[?&])tgWebAppData=/.test(window.location.hash || '');
+  } catch(e) {}
+  return 'SDK: ' + (sdkAvailable ? 'yes' : 'no') +
+    ' | initData: ' + initDataLength +
+    ' | hashData: ' + (hashHasData ? 'yes' : 'no') +
+    ' | platform: ' + (webApp && webApp.platform ? webApp.platform : 'unknown') +
+    ' | version: ' + (webApp && webApp.version ? webApp.version : 'unknown');
+}
+
 async function waitForTelegramUser() {
   if (syncTelegramUser()) return;
   for (var attempt = 0; attempt < 100; attempt++) {
     await delay(100);
     if (syncTelegramUser()) return;
   }
-  throw new Error('Не удалось определить пользователя Telegram. Закройте окно и откройте бот заново через Telegram.');
+  throw new Error(
+    'Не удалось определить пользователя Telegram. Закройте окно и откройте бот заново через Telegram.\n' +
+    getTelegramDiagnostics()
+  );
 }
 
 async function ensureTelegramIdentity(payload) {
