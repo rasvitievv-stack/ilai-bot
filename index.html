@@ -468,6 +468,69 @@ function showAlert(msg) {
   alert(msg);
 }
 
+function buildGetUrl(payload) {
+  return SCRIPT_URL + '?data=' + encodeURIComponent(JSON.stringify(payload)) +
+    '&_ts=' + Date.now() + '_' + Math.random().toString(36).slice(2);
+}
+
+async function fetchJsonGet(payload, attempts) {
+  var maxAttempts = attempts || 2;
+  var lastError = null;
+
+  for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      var resp = await fetch(buildGetUrl(payload), {
+        method: 'GET',
+        cache: 'no-store'
+      });
+      var text = await resp.text();
+
+      if (!resp.ok) throw new Error('HTTP ' + resp.status + (text ? ': ' + text.substring(0, 160) : ''));
+      if (!text || !text.trim()) throw new Error('Сервер вернул пустой ответ');
+
+      var result;
+      try {
+        result = JSON.parse(text);
+      } catch(parseErr) {
+        throw new Error('Сервер вернул не JSON: ' + text.substring(0, 160));
+      }
+
+      if (result && result.status === 'error') {
+        throw new Error(result.message || 'Ошибка Apps Script');
+      }
+      return result;
+    } catch(err) {
+      lastError = err;
+      if (attempt >= maxAttempts) break;
+    }
+  }
+
+  throw lastError || new Error('Не удалось получить ответ сервера');
+}
+
+async function postJson(payload) {
+  var resp = await fetch(SCRIPT_URL + '?_ts=' + Date.now(), {
+    method: 'POST',
+    cache: 'no-store',
+    body: JSON.stringify(payload)
+  });
+  var text = await resp.text();
+
+  if (!resp.ok) throw new Error('HTTP ' + resp.status + (text ? ': ' + text.substring(0, 160) : ''));
+  if (!text || !text.trim()) throw new Error('Сервер вернул пустой ответ');
+
+  var result;
+  try {
+    result = JSON.parse(text);
+  } catch(parseErr) {
+    throw new Error('Сервер вернул не JSON: ' + text.substring(0, 160));
+  }
+  if (!result || result.status !== 'ok') {
+    throw new Error((result && result.message) || 'Операция не подтверждена сервером');
+  }
+  return result;
+}
+
 let currentMain       = '';
 let currentSub        = ''; // 'иждивение' / 'давальческое' — единый вариант исполнения на всю форму
 let currentFixOrderId = '';
@@ -515,11 +578,7 @@ document.getElementById('btn-send-suggest').addEventListener('click', async func
   btn.textContent = 'Отправка...';
 
   try {
-    await fetch(SCRIPT_URL, {
-      method: 'POST',
-      mode: 'no-cors',
-      body: JSON.stringify({ mode: 'submitSuggestion', tg_id: tgId, tg_username: tgUsername, text: text })
-    });
+    await postJson({ mode: 'submitSuggestion', tg_id: tgId, tg_username: tgUsername, text: text });
     showAlert('✅ Спасибо! Предложение отправлено.');
     document.getElementById('suggest-text').value = '';
     document.getElementById('suggest-form').style.display = 'none';
@@ -598,8 +657,7 @@ async function loadDoplataOrders() {
   select.innerHTML = '<option value="">⏳ Загрузка...</option>';
   try {
     var payload = { mode: 'getOrders', tg_id: tgId, tg_username: tgUsername };
-    var resp    = await fetch(SCRIPT_URL + '?data=' + encodeURIComponent(JSON.stringify(payload)));
-    var result  = await resp.json();
+    var result  = await fetchJsonGet(payload, 2);
     cachedOrders = result.orders || [];
 
     // Показываем и предоплаты, и уже доплаченные заявки — к одному договору
@@ -1038,7 +1096,7 @@ document.getElementById('megaForm').addEventListener('submit', async function(e)
       payload.ksGenerate         = document.getElementById('dg-ks-checkbox').checked;
     }
 
-    await fetch(SCRIPT_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify(payload) });
+    await postJson(payload);
 
     showAlert('✅ Заявка отправлена!\n\nПроверьте Telegram — придёт подтверждение с номером заявки.');
     this.reset();
@@ -1074,17 +1132,8 @@ async function loadOrders() {
   var list = document.getElementById('orders-list');
   list.innerHTML = '<div class="loading-msg">⏳ Загрузка заявок...</div>';
   document.getElementById('searchInput').value = '';
-  var url = SCRIPT_URL + '?data=' + encodeURIComponent(JSON.stringify({ mode: 'getOrders', tg_id: tgId, tg_username: tgUsername }));
   try {
-    var resp = await fetch(url);
-    var text = await resp.text();
-    var result;
-    try {
-      result = JSON.parse(text);
-    } catch(parseErr) {
-      list.innerHTML = '<div class="empty-msg">❌ Ответ сервера:<br><small style="word-break:break-all;">' + text.substring(0, 300) + '</small></div>';
-      return;
-    }
+    var result = await fetchJsonGet({ mode: 'getOrders', tg_id: tgId, tg_username: tgUsername }, 2);
     cachedOrders = result.orders || [];
     if (!cachedOrders || cachedOrders.length === 0) {
       list.innerHTML = '<div class="empty-msg">📭 Заявок пока нет<br><small>curator: ' + (result.curator || 'пусто') + '</small></div>';
@@ -1092,7 +1141,7 @@ async function loadOrders() {
     }
     renderOrders(cachedOrders);
   } catch(err) {
-    list.innerHTML = '<div class="empty-msg">❌ Ошибка: ' + err.message + '<br><small>URL: ' + url.substring(0, 100) + '...</small></div>';
+    list.innerHTML = '<div class="empty-msg">❌ Ошибка загрузки заявок:<br><small style="word-break:break-word;">' + err.message + '</small></div>';
   }
 }
 
@@ -1225,11 +1274,7 @@ function renderOrders(orders) {
       this.disabled = true;
       this.textContent = 'Сохранение...';
       try {
-        await fetch(SCRIPT_URL, {
-          method: 'POST',
-          mode: 'no-cors',
-          body: JSON.stringify({ mode: 'setGM', orderId: id, gmText: text })
-        });
+        await postJson({ mode: 'setGM', orderId: id, gmText: text });
         showAlert('✅ Сохранено!');
       } catch(err) {
         showAlert('❌ Ошибка: ' + err.message);
@@ -1297,7 +1342,7 @@ document.getElementById('fixForm').addEventListener('submit', async function(e) 
       massFiles: massFiles
     };
 
-    await fetch(SCRIPT_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify(payload) });
+    await postJson(payload);
 
     showAlert(isAdditional
       ? '✅ Дополнительные документы загружены!\n\nПроверьте Telegram.'
@@ -1327,16 +1372,7 @@ async function loadDocMeta(contractorSelectId, signerSelectId) {
 
   try {
     var payload = { mode: 'getDocMeta' };
-    var resp    = await fetch(SCRIPT_URL + '?data=' + encodeURIComponent(JSON.stringify(payload)));
-    var text    = await resp.text();
-    var result;
-    try {
-      result = JSON.parse(text);
-    } catch(parseErr) {
-      contractorSelect.innerHTML = '<option value="">❌ ' + text.substring(0, 60) + '</option>';
-      signerSelect.innerHTML     = '<option value="">❌ Не JSON-ответ</option>';
-      return;
-    }
+    var result = await fetchJsonGet(payload, 2);
     docMetaCache = result;
     fillDocSelects(contractorSelect, signerSelect);
   } catch(err) {
