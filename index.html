@@ -4,7 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Заявки</title>
-  <script src="https://script.google.com/macros/s/AKfycbwyu12Esfnkq_CKmUtCp8jOD9VwZaNwpzCpvH3ZqJzqsyr914YdIOlgBpwZywd_gYLliQ/exec?data=%7B%22mode%22%3A%22tgScript%22%7D"></script>
+  <link rel="preconnect" href="https://telegram.org">
+  <script
+    src="https://telegram.org/js/telegram-web-app.js"
+    onerror="this.onerror=null;this.src='https://script.google.com/macros/s/AKfycbwyu12Esfnkq_CKmUtCp8jOD9VwZaNwpzCpvH3ZqJzqsyr914YdIOlgBpwZywd_gYLliQ/exec?data=%7B%22mode%22%3A%22tgScript%22%7D';">
+  </script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: Arial, sans-serif; padding: 15px; background: #f0f4f8; color: #333; }
@@ -536,6 +540,15 @@ let currentSub        = ''; // 'иждивение' / 'давальческое'
 let currentFixOrderId = '';
 let cachedOrders      = [];
 let currentLinkedContractMeta = null;
+let ordersCacheReady  = false;
+let ordersLoadedAt    = 0;
+let ordersLoadPromise = null;
+const ORDERS_CACHE_TTL_MS = 60000;
+
+function invalidateOrdersCache() {
+  ordersCacheReady = false;
+  ordersLoadedAt = 0;
+}
 
 // ===== ЭКРАНЫ =====
 function showScreen(id) {
@@ -547,7 +560,7 @@ function showScreen(id) {
 // ===== НАВИГАЦИЯ =====
 document.getElementById('btn-go-orders').addEventListener('click', function() {
   showScreen('screen-orders');
-  loadOrders();
+  loadOrders(false);
 });
 document.getElementById('btn-go-new').addEventListener('click', function() {
   showScreen('screen-new');
@@ -560,7 +573,7 @@ document.getElementById('back-from-new').addEventListener('click', function() {
 });
 document.getElementById('back-from-fix').addEventListener('click', function() {
   showScreen('screen-orders');
-  loadOrders();
+  loadOrders(false);
 });
 
 // ===== ПРЕДЛОЖЕНИЯ ПО ДОРАБОТКЕ =====
@@ -656,9 +669,14 @@ async function loadDoplataOrders() {
   var select = document.getElementById('doplata-order-select');
   select.innerHTML = '<option value="">⏳ Загрузка...</option>';
   try {
-    var payload = { mode: 'getOrders', tg_id: tgId, tg_username: tgUsername };
-    var result  = await fetchJsonGet(payload, 2);
-    cachedOrders = result.orders || [];
+    var cacheFresh = ordersCacheReady && (Date.now() - ordersLoadedAt < ORDERS_CACHE_TTL_MS);
+    if (!cacheFresh) {
+      var payload = { mode: 'getOrders', tg_id: tgId, tg_username: tgUsername };
+      var result  = await fetchJsonGet(payload, 2);
+      cachedOrders = result.orders || [];
+      ordersCacheReady = true;
+      ordersLoadedAt = Date.now();
+    }
 
     // Показываем и предоплаты, и уже доплаченные заявки — к одному договору
     // может быть несколько ДС подряд, после первого статус меняется на "доплата"
@@ -1097,6 +1115,7 @@ document.getElementById('megaForm').addEventListener('submit', async function(e)
     }
 
     await postJson(payload);
+    invalidateOrdersCache();
 
     showAlert('✅ Заявка отправлена!\n\nПроверьте Telegram — придёт подтверждение с номером заявки.');
     this.reset();
@@ -1128,21 +1147,38 @@ document.getElementById('megaForm').addEventListener('submit', async function(e)
 });
 
 // ===== ЗАГРУЗКА ЗАЯВОК =====
-async function loadOrders() {
+function loadOrders(forceReload) {
   var list = document.getElementById('orders-list');
-  list.innerHTML = '<div class="loading-msg">⏳ Загрузка заявок...</div>';
   document.getElementById('searchInput').value = '';
-  try {
-    var result = await fetchJsonGet({ mode: 'getOrders', tg_id: tgId, tg_username: tgUsername }, 2);
-    cachedOrders = result.orders || [];
-    if (!cachedOrders || cachedOrders.length === 0) {
-      list.innerHTML = '<div class="empty-msg">📭 Заявок пока нет<br><small>curator: ' + (result.curator || 'пусто') + '</small></div>';
-      return;
-    }
+
+  var cacheFresh = ordersCacheReady && (Date.now() - ordersLoadedAt < ORDERS_CACHE_TTL_MS);
+  if (!forceReload && cacheFresh) {
     renderOrders(cachedOrders);
-  } catch(err) {
-    list.innerHTML = '<div class="empty-msg">❌ Ошибка загрузки заявок:<br><small style="word-break:break-word;">' + err.message + '</small></div>';
+    return Promise.resolve(cachedOrders);
   }
+  if (ordersLoadPromise) return ordersLoadPromise;
+
+  list.innerHTML = '<div class="loading-msg">⏳ Загрузка заявок...</div>';
+  ordersLoadPromise = (async function() {
+    try {
+      var result = await fetchJsonGet({ mode: 'getOrders', tg_id: tgId, tg_username: tgUsername }, 2);
+      cachedOrders = result.orders || [];
+      ordersCacheReady = true;
+      ordersLoadedAt = Date.now();
+      if (!cachedOrders || cachedOrders.length === 0) {
+        list.innerHTML = '<div class="empty-msg">📭 Заявок пока нет<br><small>curator: ' + (result.curator || 'пусто') + '</small></div>';
+        return cachedOrders;
+      }
+      renderOrders(cachedOrders);
+      return cachedOrders;
+    } catch(err) {
+      list.innerHTML = '<div class="empty-msg">❌ Ошибка загрузки заявок:<br><small style="word-break:break-word;">' + err.message + '</small></div>';
+      return [];
+    } finally {
+      ordersLoadPromise = null;
+    }
+  })();
+  return ordersLoadPromise;
 }
 
 // ===== РЕНДЕР КАРТОЧЕК =====
@@ -1275,6 +1311,7 @@ function renderOrders(orders) {
       this.textContent = 'Сохранение...';
       try {
         await postJson({ mode: 'setGM', orderId: id, gmText: text });
+        invalidateOrdersCache();
         showAlert('✅ Сохранено!');
       } catch(err) {
         showAlert('❌ Ошибка: ' + err.message);
@@ -1343,13 +1380,14 @@ document.getElementById('fixForm').addEventListener('submit', async function(e) 
     };
 
     await postJson(payload);
+    invalidateOrdersCache();
 
     showAlert(isAdditional
       ? '✅ Дополнительные документы загружены!\n\nПроверьте Telegram.'
       : '✅ Исправленные документы загружены!\n\nПроверьте Telegram.');
     this.reset();
     showScreen('screen-orders');
-    loadOrders();
+    loadOrders(true);
 
   } catch(err) {
     showAlert('❌ Ошибка: ' + err.message);
