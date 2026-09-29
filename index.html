@@ -481,7 +481,7 @@ function delay(ms) {
 
 async function waitForTelegramUser() {
   if (syncTelegramUser()) return;
-  for (var attempt = 0; attempt < 20; attempt++) {
+  for (var attempt = 0; attempt < 100; attempt++) {
     await delay(100);
     if (syncTelegramUser()) return;
   }
