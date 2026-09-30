@@ -451,6 +451,31 @@ try {
 
 let tgId = '';
 let tgUsername = '';
+let telegramInitData = '';
+
+function readTelegramInitData() {
+  try {
+    if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData) {
+      return window.Telegram.WebApp.initData;
+    }
+    var hashParams = new URLSearchParams((window.location.hash || '').replace(/^#/, ''));
+    return hashParams.get('tgWebAppData') || '';
+  } catch(e) {
+    return '';
+  }
+}
+
+function readTelegramUser(initData) {
+  try {
+    if (!initData) return null;
+    var rawUser = new URLSearchParams(initData).get('user');
+    if (!rawUser) return null;
+    var user = JSON.parse(rawUser);
+    return user && user.id != null ? user : null;
+  } catch(e) {
+    return null;
+  }
+}
 
 function syncTelegramUser() {
   try {
@@ -459,7 +484,9 @@ function syncTelegramUser() {
       tg.ready();
       tg.expand();
     }
+    telegramInitData = readTelegramInitData();
     var user = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
+    if (!user) user = readTelegramUser(telegramInitData);
     var nextId = user && user.id != null ? user.id.toString().trim() : '';
     if (!/^\d+$/.test(nextId)) return false;
 
@@ -479,36 +506,19 @@ function delay(ms) {
   return new Promise(function(resolve) { setTimeout(resolve, ms); });
 }
 
-function getTelegramDiagnostics() {
-  var sdkAvailable = !!(window.Telegram && window.Telegram.WebApp);
-  var webApp = sdkAvailable ? window.Telegram.WebApp : null;
-  var initDataLength = webApp && webApp.initData ? webApp.initData.length : 0;
-  var hashHasData = false;
-  try {
-    hashHasData = /(?:^#|[?&])tgWebAppData=/.test(window.location.hash || '');
-  } catch(e) {}
-  return 'SDK: ' + (sdkAvailable ? 'yes' : 'no') +
-    ' | initData: ' + initDataLength +
-    ' | hashData: ' + (hashHasData ? 'yes' : 'no') +
-    ' | platform: ' + (webApp && webApp.platform ? webApp.platform : 'unknown') +
-    ' | version: ' + (webApp && webApp.version ? webApp.version : 'unknown');
-}
-
 async function waitForTelegramUser() {
   if (syncTelegramUser()) return;
   for (var attempt = 0; attempt < 100; attempt++) {
     await delay(100);
     if (syncTelegramUser()) return;
   }
-  throw new Error(
-    'Не удалось определить пользователя Telegram. Закройте окно и откройте бот заново через Telegram.\n' +
-    getTelegramDiagnostics()
-  );
+  throw new Error('Не удалось подтвердить пользователя Telegram. Закройте окно и откройте бот заново через Telegram.');
 }
 
 async function ensureTelegramIdentity(payload) {
-  if (!payload || !Object.prototype.hasOwnProperty.call(payload, 'tg_id')) return;
+  if (!payload || payload.mode === 'getDocMeta') return;
   await waitForTelegramUser();
+  payload.telegram_init_data = telegramInitData;
   payload.tg_id = tgId;
   payload.tg_username = tgUsername;
 }
