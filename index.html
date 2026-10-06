@@ -171,6 +171,10 @@
     .maintenance-pair-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 12px; font-weight: bold; color: #555; }
     .remove-maintenance-pair { border: none; background: #dc3545; color: #fff; border-radius: 5px; padding: 5px 9px; cursor: pointer; }
     .add-maintenance-pair { width: 100%; padding: 10px; margin: 0 0 14px; border: 1px dashed #2481cc; border-radius: 6px; background: #eef7ff; color: #1669a8; font-weight: bold; cursor: pointer; }
+    .doc-meta-actions { display: flex; align-items: center; gap: 8px; margin-top: 7px; }
+    .doc-meta-refresh { padding: 6px 10px; border: 1px solid #2481cc; border-radius: 6px; background: #eef7ff; color: #1669a8; font-size: 12px; cursor: pointer; }
+    .doc-meta-refresh:disabled { color: #888; border-color: #bbb; background: #eee; cursor: wait; }
+    .doc-meta-status { color: #777; font-size: 11px; }
 
     .gm-block { padding: 10px 14px; border-top: 1px solid #f0f0f0; }
     .gm-block input[type="text"] { margin-bottom: 8px; }
@@ -429,7 +433,12 @@
       <div class="maintenance-only" id="maintenance-fields">
         <div class="form-group">
           <label>Подрядчик *</label>
-          <select id="maintenance-contractor"><option value="">— Выберите подрядчика —</option></select>
+          <input type="text" id="maintenance-contractor" list="maintenance-contractor-options" autocomplete="off" placeholder="Начните вводить название подрядчика">
+          <datalist id="maintenance-contractor-options"></datalist>
+          <div class="doc-meta-actions">
+            <button type="button" class="doc-meta-refresh" id="refresh-doc-meta">🔄 Обновить список</button>
+            <span class="doc-meta-status" id="doc-meta-status"></span>
+          </div>
         </div>
         <div class="form-group">
           <label>Сумма *</label>
@@ -733,7 +742,7 @@ function selectRequestMode(mode) {
 
   if (maintenance) {
     if (!document.querySelector('#maintenance-pairs .maintenance-pair')) addMaintenancePair();
-    loadDocMeta('maintenance-contractor', null);
+    loadDocMeta(null, null);
   }
 
   if (currentMain === 'status2') {
@@ -864,7 +873,7 @@ async function loadDoplataOrders() {
     // Показываем и предоплаты, и уже доплаченные заявки — к одному договору
     // может быть несколько ДС подряд, после первого статус меняется на "доплата"
     var predoplaty = cachedOrders.filter(function(o) {
-      return (
+      return o.sourceSheet === 'Лист1' && (!o.requestMode || o.requestMode === 'Проект') && (
         o.paymentType === 'предоплата' || o.paymentType === 'status1' ||
         o.paymentType === 'доплата'    || o.paymentType === 'status2'
       );
@@ -1510,17 +1519,18 @@ function renderOrders(orders) {
           (order.fixFolderUrl ? '🔄 Загрузить снова' : '⚠️ Исправленные') +
         '</button>' +
         '<button class="link-btn gray add-docs-btn" data-id="' + order.id + '">📎 Доп. документы</button>' +
-        '<button class="link-btn gray gm-toggle-btn" data-id="' + order.id + '">' +
-          '📝 ГМ' + (order.gm ? ' ✓' : '') +
-        '</button>' +
+        (order.supportsGm ?
+          '<button class="link-btn gray gm-toggle-btn" data-id="' + order.id + '">' +
+            '📝 ГМ' + (order.gm ? ' ✓' : '') +
+          '</button>' : '') +
       '</div>';
 
     var gmValueEscaped = (order.gm || '').replace(/"/g, '&quot;');
-    var gmBlock =
+    var gmBlock = order.supportsGm ?
       '<div class="gm-block" id="gm-block-' + order.id + '" style="display:none;">' +
         '<input type="text" class="gm-input" data-id="' + order.id + '" value="' + gmValueEscaped + '" placeholder="Введите текст ГМ">' +
         '<button class="submit-btn gm-save-btn" data-id="' + order.id + '">Сохранить</button>' +
-      '</div>';
+      '</div>' : '';
 
     card.innerHTML = cardBody + avansBlock + zakrBlock + footer + gmBlock;
     list.appendChild(card);
@@ -1642,26 +1652,155 @@ document.getElementById('fixForm').addEventListener('submit', async function(e) 
   }
 });
 
-// ===== ЗАГРУЗКА СПИСКОВ ПОДРЯДЧИКОВ / ПОДПИСАНТОВ (общий кэш) =====
+// ===== ЗАГРУЗКА СПИСКОВ ПОДРЯДЧИКОВ / ПОДПИСАНТОВ (двухуровневый кэш) =====
+const DOC_META_STORAGE_KEY = 'ilai_doc_meta_v2';
+const DOC_META_CACHE_TTL_MS = 60 * 60 * 1000;
 var docMetaCache = null;
+var docMetaLoadedAt = 0;
+var docMetaLoadPromise = null;
+var docMetaRefreshTimer = null;
+
+function normalizeDocMeta(result) {
+  if (!result || result.status !== 'ok') throw new Error('Получен некорректный справочник');
+  return {
+    status: 'ok',
+    contractors: Array.isArray(result.contractors) ? result.contractors.map(function(c) {
+      return { key: String(c.key || ''), display: String(c.display || c.key || '') };
+    }).filter(function(c) { return c.key; }) : [],
+    signers: Array.isArray(result.signers) ? result.signers.map(function(s) {
+      return { key: String(s.key || ''), display: String(s.display || s.key || '') };
+    }).filter(function(s) { return s.key; }) : [],
+    generatedAt: Number(result.generatedAt) || Date.now()
+  };
+}
+
+function restoreDocMetaCache() {
+  if (docMetaCache) return true;
+  try {
+    var saved = JSON.parse(localStorage.getItem(DOC_META_STORAGE_KEY) || 'null');
+    if (!saved || !saved.data) return false;
+    docMetaCache = normalizeDocMeta(saved.data);
+    docMetaLoadedAt = Number(saved.savedAt) || docMetaCache.generatedAt;
+    return true;
+  } catch(e) {
+    try { localStorage.removeItem(DOC_META_STORAGE_KEY); } catch(ignore) {}
+    return false;
+  }
+}
+
+function saveDocMetaCache(result) {
+  docMetaCache = normalizeDocMeta(result);
+  docMetaLoadedAt = docMetaCache.generatedAt;
+  try {
+    localStorage.setItem(DOC_META_STORAGE_KEY, JSON.stringify({
+      savedAt: docMetaLoadedAt,
+      data: docMetaCache
+    }));
+  } catch(e) {}
+}
+
+function setDocMetaStatus(text) {
+  var status = document.getElementById('doc-meta-status');
+  if (status) status.textContent = text || '';
+}
+
+function fillAllDocMetaControls() {
+  fillDocSelects(document.getElementById('cg-contractor'), document.getElementById('cg-signer'));
+  fillDocSelects(document.getElementById('dg-contractor'), document.getElementById('dg-signer'));
+  fillMaintenanceContractorHints();
+}
+
+function scheduleDocMetaRefresh() {
+  if (docMetaRefreshTimer) clearTimeout(docMetaRefreshTimer);
+  var age = docMetaLoadedAt ? Date.now() - docMetaLoadedAt : DOC_META_CACHE_TTL_MS;
+  // Если серверный CacheService прожил немного дольше локального таймера,
+  // не создаём частые повторные запросы: следующая проверка не раньше минуты.
+  var delayMs = Math.max(60000, DOC_META_CACHE_TTL_MS - age);
+  docMetaRefreshTimer = setTimeout(function() {
+    refreshDocMeta(false).catch(function() {});
+  }, delayMs);
+}
+
+async function refreshDocMeta(forceRefresh) {
+  if (docMetaLoadPromise) {
+    if (!forceRefresh) return docMetaLoadPromise;
+    // Ручная кнопка должна действительно перечитать таблицу, даже если в этот
+    // момент заканчивается обычное фоновое чтение серверного кэша.
+    try { await docMetaLoadPromise; } catch(ignore) {}
+  }
+  docMetaLoadPromise = (async function() {
+    try {
+      setDocMetaStatus(forceRefresh ? 'Обновление…' : 'Обновление в фоне…');
+      var result = forceRefresh
+        ? await postJson({ mode: 'refreshDocMeta' })
+        : await fetchJsonGet({ mode: 'getDocMeta' }, 2);
+      saveDocMetaCache(result);
+      fillAllDocMetaControls();
+      setDocMetaStatus(forceRefresh ? 'Список обновлён' : '');
+      scheduleDocMetaRefresh();
+      return docMetaCache;
+    } catch(err) {
+      setDocMetaStatus('Не удалось обновить');
+      if (docMetaRefreshTimer) clearTimeout(docMetaRefreshTimer);
+      docMetaRefreshTimer = setTimeout(function() {
+        refreshDocMeta(false).catch(function() {});
+      }, 5 * 60 * 1000);
+      throw err;
+    }
+  })();
+  try {
+    return await docMetaLoadPromise;
+  } finally {
+    docMetaLoadPromise = null;
+  }
+}
+
 async function loadDocMeta(contractorSelectId, signerSelectId) {
-  var contractorSelect = document.getElementById(contractorSelectId);
+  var contractorSelect = contractorSelectId ? document.getElementById(contractorSelectId) : null;
   var signerSelect      = signerSelectId ? document.getElementById(signerSelectId) : null;
 
-  if (docMetaCache) {
+  if (docMetaCache || restoreDocMetaCache()) {
     fillDocSelects(contractorSelect, signerSelect);
+    fillMaintenanceContractorHints();
+    scheduleDocMetaRefresh();
+    if (Date.now() - docMetaLoadedAt >= DOC_META_CACHE_TTL_MS) {
+      refreshDocMeta(false).catch(function() { setDocMetaStatus('Не удалось обновить'); });
+    }
     return;
   }
 
   try {
-    var payload = { mode: 'getDocMeta' };
-    var result = await fetchJsonGet(payload, 2);
-    docMetaCache = result;
+    await refreshDocMeta(false);
     fillDocSelects(contractorSelect, signerSelect);
+    fillMaintenanceContractorHints();
   } catch(err) {
     if (contractorSelect) contractorSelect.innerHTML = '<option value="">❌ ' + err.message + '</option>';
     if (signerSelect) signerSelect.innerHTML = '<option value="">❌ ' + err.message + '</option>';
   }
+}
+
+document.getElementById('refresh-doc-meta').addEventListener('click', async function() {
+  var btn = this;
+  btn.disabled = true;
+  try {
+    await refreshDocMeta(true);
+  } catch(err) {
+    setDocMetaStatus('Ошибка обновления');
+    showAlert('❌ Не удалось обновить список: ' + err.message);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+function fillMaintenanceContractorHints() {
+  var dataList = document.getElementById('maintenance-contractor-options');
+  if (!dataList || !docMetaCache || docMetaCache.status !== 'ok') return;
+  dataList.innerHTML = '';
+  docMetaCache.contractors.forEach(function(c) {
+    var opt = document.createElement('option');
+    opt.value = c.display;
+    dataList.appendChild(opt);
+  });
 }
 
 function fillDocSelects(contractorSelect, signerSelect) {
