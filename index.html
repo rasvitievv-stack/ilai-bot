@@ -166,6 +166,12 @@
 
     .meta-hint { font-size: 11px; color: #2481cc; margin-bottom: 10px; }
 
+    .maintenance-only { display: none; }
+    .maintenance-pair { padding: 12px; margin-bottom: 10px; border: 1px solid #dbe3ea; border-radius: 8px; background: #f8fafc; }
+    .maintenance-pair-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 12px; font-weight: bold; color: #555; }
+    .remove-maintenance-pair { border: none; background: #dc3545; color: #fff; border-radius: 5px; padding: 5px 9px; cursor: pointer; }
+    .add-maintenance-pair { width: 100%; padding: 10px; margin: 0 0 14px; border: 1px dashed #2481cc; border-radius: 6px; background: #eef7ff; color: #1669a8; font-weight: bold; cursor: pointer; }
+
     .gm-block { padding: 10px 14px; border-top: 1px solid #f0f0f0; }
     .gm-block input[type="text"] { margin-bottom: 8px; }
 
@@ -247,6 +253,13 @@
 <div id="screen-new" class="screen">
   <div class="page-header">➕ Новая заявка</div>
   <button class="back-btn" id="back-from-new">← Назад</button>
+
+  <div class="section-title">Тип заявки</div>
+  <div class="type-buttons" id="request-mode-buttons">
+    <button type="button" class="btn active" id="btn-mode-project">Проект</button>
+    <button type="button" class="btn" id="btn-mode-maintenance-work">Обслуживание работа</button>
+    <button type="button" class="btn" id="btn-mode-maintenance-purchase">Обслуживание закуп</button>
+  </div>
 
   <div class="section-title">Тип оплаты</div>
   <div class="type-buttons" id="payment-type-buttons">
@@ -405,13 +418,25 @@
 
   <form id="megaForm">
     <div id="form-fields" class="form-box">
-      <div class="form-group">
+      <div class="form-group project-only">
         <label>Подрядчик *</label>
-        <input type="text" id="contractor" placeholder="Наименование подрядчика" required>
+        <input type="text" id="contractor" placeholder="Наименование подрядчика">
       </div>
-      <div class="form-group">
+      <div class="form-group project-only">
         <label>Филиал *</label>
-        <input type="text" id="branch" placeholder="Название филиала" required>
+        <input type="text" id="branch" placeholder="Название филиала">
+      </div>
+      <div class="maintenance-only" id="maintenance-fields">
+        <div class="form-group">
+          <label>Подрядчик *</label>
+          <select id="maintenance-contractor"><option value="">— Выберите подрядчика —</option></select>
+        </div>
+        <div class="form-group">
+          <label>Сумма *</label>
+          <input type="text" id="maintenance-amount" inputmode="decimal" placeholder="100 000">
+        </div>
+        <div id="maintenance-pairs"></div>
+        <button type="button" class="add-maintenance-pair" id="add-maintenance-pair">＋ Добавить филиал и ссылку</button>
       </div>
       <div class="form-group">
         <label>📎 Документы (можно выбрать сразу несколько файлов)</label>
@@ -614,6 +639,7 @@ async function postJson(payload) {
 
 let currentMain       = '';
 let currentSub        = ''; // 'иждивение' / 'давальческое' — единый вариант исполнения на всю форму
+let currentRequestMode = 'project';
 let currentFixOrderId = '';
 let cachedOrders      = [];
 let currentLinkedContractMeta = null;
@@ -642,6 +668,7 @@ document.getElementById('btn-go-orders').addEventListener('click', function() {
   loadOrders(false);
 });
 document.getElementById('btn-go-new').addEventListener('click', function() {
+  selectRequestMode('project');
   showScreen('screen-new');
 });
 document.getElementById('back-from-orders').addEventListener('click', function() {
@@ -682,6 +709,79 @@ document.getElementById('btn-send-suggest').addEventListener('click', async func
   }
 });
 
+// ===== ТИП ЗАЯВКИ =====
+document.getElementById('btn-mode-project').addEventListener('click', function() { selectRequestMode('project'); });
+document.getElementById('btn-mode-maintenance-work').addEventListener('click', function() { selectRequestMode('maintenance_work'); });
+document.getElementById('btn-mode-maintenance-purchase').addEventListener('click', function() { selectRequestMode('maintenance_purchase'); });
+document.getElementById('add-maintenance-pair').addEventListener('click', function() { addMaintenancePair(); });
+
+function isMaintenanceMode() {
+  return currentRequestMode === 'maintenance_work' || currentRequestMode === 'maintenance_purchase';
+}
+
+function selectRequestMode(mode) {
+  currentRequestMode = mode || 'project';
+  document.querySelectorAll('#request-mode-buttons .btn').forEach(function(btn) { btn.classList.remove('active'); });
+  var activeId = currentRequestMode === 'maintenance_work'
+    ? 'btn-mode-maintenance-work'
+    : (currentRequestMode === 'maintenance_purchase' ? 'btn-mode-maintenance-purchase' : 'btn-mode-project');
+  document.getElementById(activeId).classList.add('active');
+
+  var maintenance = isMaintenanceMode();
+  document.querySelectorAll('.project-only').forEach(function(el) { el.style.display = maintenance ? 'none' : 'block'; });
+  document.querySelectorAll('.maintenance-only').forEach(function(el) { el.style.display = maintenance ? 'block' : 'none'; });
+
+  if (maintenance) {
+    if (!document.querySelector('#maintenance-pairs .maintenance-pair')) addMaintenancePair();
+    loadDocMeta('maintenance-contractor', null);
+  }
+
+  if (currentMain === 'status2') {
+    document.getElementById('doplata-block').style.display = maintenance ? 'none' : 'block';
+    if (!maintenance) loadDoplataOrders();
+  }
+}
+
+function addMaintenancePair(branchValue, urlValue) {
+  var container = document.getElementById('maintenance-pairs');
+  var pair = document.createElement('div');
+  pair.className = 'maintenance-pair';
+  pair.innerHTML =
+    '<div class="maintenance-pair-head"><span>Филиал и заявка</span><button type="button" class="remove-maintenance-pair">×</button></div>' +
+    '<div class="form-group"><label>Филиал *</label><input type="text" class="maintenance-branch" placeholder="Название филиала"></div>' +
+    '<div class="form-group"><label>Ссылка на заявку *</label><input type="text" class="maintenance-request-url" inputmode="url" placeholder="https://ecosystem.dns-shop.ru/crm/type/145/details/4849/"></div>';
+  pair.querySelector('.maintenance-branch').value = branchValue || '';
+  pair.querySelector('.maintenance-request-url').value = urlValue || '';
+  pair.querySelector('.remove-maintenance-pair').addEventListener('click', function() {
+    if (container.querySelectorAll('.maintenance-pair').length === 1) {
+      pair.querySelector('.maintenance-branch').value = '';
+      pair.querySelector('.maintenance-request-url').value = '';
+      return;
+    }
+    pair.remove();
+  });
+  container.appendChild(pair);
+}
+
+function collectMaintenanceItems() {
+  var items = [];
+  var urlPattern = /^https:\/\/ecosystem\.dns-shop\.ru\/crm\/type\/145\/details\/(\d+)\/?(?:[?#].*)?$/i;
+  var pairs = document.querySelectorAll('#maintenance-pairs .maintenance-pair');
+  for (var i = 0; i < pairs.length; i++) {
+    var branch = pairs[i].querySelector('.maintenance-branch').value.trim();
+    var url = pairs[i].querySelector('.maintenance-request-url').value.trim();
+    if (!branch || !url) throw new Error('Заполните филиал и ссылку в паре №' + (i + 1));
+    var match = url.match(urlPattern);
+    if (!match) throw new Error('Неверная ссылка в паре №' + (i + 1) + '. Ожидается ссылка на CRM-заявку типа 145.');
+    items.push({
+      branch: branch,
+      requestUrl: 'https://ecosystem.dns-shop.ru/crm/type/145/details/' + match[1] + '/',
+      requestNumber: match[1]
+    });
+  }
+  return items;
+}
+
 // ===== ТИП ОПЛАТЫ =====
 document.getElementById('btn-status1').addEventListener('click', function() { selectMain('status1'); });
 document.getElementById('btn-status2').addEventListener('click', function() { selectMain('status2'); });
@@ -713,9 +813,9 @@ function selectMain(type) {
     loadDocMeta('cg-contractor', 'cg-signer');
     document.getElementById('form-fields').classList.add('active');
   } else if (type === 'status2') {
-    document.getElementById('doplata-block').style.display      = 'block';
+    document.getElementById('doplata-block').style.display      = isMaintenanceMode() ? 'none' : 'block';
     document.getElementById('work-variant-block').style.display = 'block';
-    loadDoplataOrders();
+    if (!isMaintenanceMode()) loadDoplataOrders();
     document.getElementById('form-fields').classList.add('active');
   } else if (type === 'status3') {
     document.getElementById('work-variant-block').style.display = 'block';
@@ -895,8 +995,15 @@ document.getElementById('ds-need-checkbox').addEventListener('change', async fun
   }
 });
 
+function setPrimaryContractor(value) {
+  if (!value) return;
+  document.getElementById('contractor').value = value;
+  var maintenanceSelect = document.getElementById('maintenance-contractor');
+  if (maintenanceSelect && isMaintenanceMode()) maintenanceSelect.value = value;
+}
+
 document.getElementById('dg-contractor').addEventListener('change', function() {
-  if (this.value) document.getElementById('contractor').value = this.value;
+  setPrimaryContractor(this.value);
 });
 
 var dgNds = 'С НДС';
@@ -945,7 +1052,7 @@ document.getElementById('contract-mode-generate').addEventListener('click', func
 });
 
 document.getElementById('cg-contractor').addEventListener('change', function() {
-  if (this.value) document.getElementById('contractor').value = this.value;
+  setPrimaryContractor(this.value);
 });
 
 var cgNds = 'С НДС';
@@ -1095,10 +1202,39 @@ document.getElementById('megaForm').addEventListener('submit', async function(e)
   if (!currentMain) { showAlert('Выберите тип оплаты!'); return; }
   if (!currentSub)  { showAlert('Выберите вариант исполнения!'); return; }
 
+  var contractorValue = '';
+  var branchValue = '';
+  var maintenanceAmount = '';
+  var maintenanceItems = [];
+
+  if (isMaintenanceMode()) {
+    contractorValue = document.getElementById('maintenance-contractor').value.trim();
+    maintenanceAmount = document.getElementById('maintenance-amount').value.trim();
+    if (!contractorValue) { showAlert('Выберите подрядчика!'); return; }
+    var parsedAmount = Number(maintenanceAmount.replace(/\s/g, '').replace(',', '.'));
+    if (!maintenanceAmount || !isFinite(parsedAmount) || parsedAmount <= 0) {
+      showAlert('Укажите корректную сумму больше нуля!');
+      return;
+    }
+    maintenanceAmount = parsedAmount.toString();
+    try {
+      maintenanceItems = collectMaintenanceItems();
+    } catch(validationErr) {
+      showAlert(validationErr.message);
+      return;
+    }
+    branchValue = maintenanceItems.map(function(item) { return item.branch; }).join(', ');
+  } else {
+    contractorValue = document.getElementById('contractor').value.trim();
+    branchValue = document.getElementById('branch').value.trim();
+    if (!contractorValue) { showAlert('Укажите подрядчика!'); return; }
+    if (!branchValue) { showAlert('Укажите филиал!'); return; }
+  }
+
   var linkedOrderId   = '';
   var linkedFolderUrl = '';
 
-  if (currentMain === 'status2') {
+  if (currentRequestMode === 'project' && currentMain === 'status2') {
     var selectVal = document.getElementById('doplata-order-select').value;
     if (!selectVal) { showAlert('Выберите заявку или "Не связанная заявка"!'); return; }
 
@@ -1122,7 +1258,7 @@ document.getElementById('megaForm').addEventListener('submit', async function(e)
     }
   }
 
-  var dsGenerateChecked = currentMain === 'status2' && document.getElementById('ds-need-checkbox').checked;
+  var dsGenerateChecked = currentRequestMode === 'project' && currentMain === 'status2' && document.getElementById('ds-need-checkbox').checked;
   if (dsGenerateChecked) {
     if (!document.getElementById('dg-contractor').value) { showAlert('Выберите подрядчика для ДС!'); return; }
     if (!document.getElementById('dg-signer').value)      { showAlert('Выберите подписанта для ДС!'); return; }
@@ -1153,8 +1289,11 @@ document.getElementById('megaForm').addEventListener('submit', async function(e)
       tg_username: tgUsername,
       paymentType: currentMain,
       subType: currentSub,
-      contractor: document.getElementById('contractor').value.trim(),
-      branch:     document.getElementById('branch').value.trim(),
+      requestMode: currentRequestMode,
+      contractor: contractorValue,
+      branch: branchValue,
+      maintenanceAmount: maintenanceAmount,
+      maintenanceItems: maintenanceItems,
       m15: m15,
       linkedOrderId: linkedOrderId,
       linkedFolderUrl: linkedFolderUrl,
@@ -1218,7 +1357,10 @@ document.getElementById('megaForm').addEventListener('submit', async function(e)
     resetDsGenerateCheckbox();
     resetWorkVariantButtons();
     document.querySelectorAll('.btn').forEach(function(b) { b.classList.remove('active'); });
+    document.getElementById('maintenance-pairs').innerHTML = '';
+    addMaintenancePair();
     currentMain = ''; currentSub = ''; currentLinkedContractMeta = null;
+    selectRequestMode('project');
     showScreen('screen-menu');
 
   } catch(err) {
@@ -1504,7 +1646,7 @@ document.getElementById('fixForm').addEventListener('submit', async function(e) 
 var docMetaCache = null;
 async function loadDocMeta(contractorSelectId, signerSelectId) {
   var contractorSelect = document.getElementById(contractorSelectId);
-  var signerSelect      = document.getElementById(signerSelectId);
+  var signerSelect      = signerSelectId ? document.getElementById(signerSelectId) : null;
 
   if (docMetaCache) {
     fillDocSelects(contractorSelect, signerSelect);
@@ -1517,29 +1659,37 @@ async function loadDocMeta(contractorSelectId, signerSelectId) {
     docMetaCache = result;
     fillDocSelects(contractorSelect, signerSelect);
   } catch(err) {
-    contractorSelect.innerHTML = '<option value="">❌ ' + err.message + '</option>';
-    signerSelect.innerHTML     = '<option value="">❌ ' + err.message + '</option>';
+    if (contractorSelect) contractorSelect.innerHTML = '<option value="">❌ ' + err.message + '</option>';
+    if (signerSelect) signerSelect.innerHTML = '<option value="">❌ ' + err.message + '</option>';
   }
 }
 
 function fillDocSelects(contractorSelect, signerSelect) {
   if (!docMetaCache || docMetaCache.status !== 'ok') return;
 
-  contractorSelect.innerHTML = '<option value="">— Выберите подрядчика —</option>';
-  docMetaCache.contractors.forEach(function(c) {
-    var opt = document.createElement('option');
-    opt.value = c.key;
-    opt.textContent = c.display;
-    contractorSelect.appendChild(opt);
-  });
+  if (contractorSelect) {
+    var selectedContractor = contractorSelect.value;
+    contractorSelect.innerHTML = '<option value="">— Выберите подрядчика —</option>';
+    docMetaCache.contractors.forEach(function(c) {
+      var opt = document.createElement('option');
+      opt.value = c.key;
+      opt.textContent = c.display;
+      contractorSelect.appendChild(opt);
+    });
+    contractorSelect.value = selectedContractor;
+  }
 
-  signerSelect.innerHTML = '<option value="">— Выберите подписанта —</option>';
-  docMetaCache.signers.forEach(function(s) {
-    var opt = document.createElement('option');
-    opt.value = s.key;
-    opt.textContent = s.display;
-    signerSelect.appendChild(opt);
-  });
+  if (signerSelect) {
+    var selectedSigner = signerSelect.value;
+    signerSelect.innerHTML = '<option value="">— Выберите подписанта —</option>';
+    docMetaCache.signers.forEach(function(s) {
+      var opt = document.createElement('option');
+      opt.value = s.key;
+      opt.textContent = s.display;
+      signerSelect.appendChild(opt);
+    });
+    signerSelect.value = selectedSigner;
+  }
 }
 </script>
 </body>
