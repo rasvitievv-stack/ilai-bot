@@ -613,7 +613,7 @@ async function fetchJsonGet(payload, attempts) {
       }
 
       if (result && result.status === 'error') {
-        throw new Error(result.message || 'Ошибка Apps Script');
+        throw new Error((result.message || 'Ошибка Apps Script') + (result.requestId ? '\nКод диагностики: ' + result.requestId : ''));
       }
       return result;
     } catch(err) {
@@ -650,11 +650,38 @@ async function postJson(payload) {
     throw new Error('Сервер вернул не JSON: ' + text.substring(0, 160));
   }
   if (!result || result.status !== 'ok') {
-    var serverError = new Error((result && result.message) || 'Операция не подтверждена сервером');
+    var serverError = new Error(((result && result.message) || 'Операция не подтверждена сервером') + (result && result.requestId ? '\nКод диагностики: ' + result.requestId : ''));
     serverError.serverResult = result;
     throw serverError;
   }
   return result;
+}
+
+async function sendPurchasesWithRecovery(payload) {
+  try { return await postJson(payload); }
+  catch(sendError) {
+    // Явная ошибка валидации не требует проверки журнала.
+    if (sendError.serverResult && !sendError.serverResult.batchStarted) throw sendError;
+    document.getElementById('submit-new').textContent = '⏳ Проверка созданных закупов...';
+    var lastState = null;
+    var readError = null;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      if (attempt) await new Promise(function(resolve) { setTimeout(resolve, 1500); });
+      try {
+        lastState = await fetchJsonGet({ mode: 'purchaseBatchStatus', batchKey: payload.batchKey, itemCount: payload.purchaseItems.length }, 1);
+        if (lastState.batchState === 'completed') return { status: 'ok', orderIds: lastState.orderIds };
+        if (!lastState.batchState) throw new Error('Опубликованный сервер не поддерживает проверку пакета');
+      } catch(err) { readError = err; break; }
+    }
+    var message = lastState && Array.isArray(lastState.orderIds) && lastState.orderIds.length
+      ? 'Записаны закупы: ' + lastState.orderIds.join(', ') + '. Завершение всех уведомлений пока не подтверждено.'
+      : 'Не удалось подтвердить завершение отправки. Это не означает, что закупы не созданы.';
+    if (readError) message += '\nПроверка состояния недоступна: ' + readError.message;
+    else if (sendError.serverResult) message += '\n' + sendError.message;
+    var pendingError = new Error(message + '\nНе закрывайте окно: повтор использует тот же пакет.');
+    pendingError.serverResult = { batchStarted: true };
+    throw pendingError;
+  }
 }
 
 let currentMain       = '';
@@ -1310,7 +1337,7 @@ document.getElementById('megaForm').addEventListener('submit', async function(e)
         pendingPurchasePayload = { mode: 'newPurchases', paymentType: currentMain, batchKey: purchaseBatchKey, purchaseItems: purchaseItems };
       }
       document.querySelectorAll('#purchase-items input, #purchase-items button, #add-purchase-item').forEach(function(control) { control.disabled = true; });
-      var purchaseResult = await postJson(pendingPurchasePayload);
+      var purchaseResult = await sendPurchasesWithRecovery(pendingPurchasePayload);
       purchaseBatchKey = '';
       pendingPurchasePayload = null;
       document.getElementById('add-purchase-item').disabled = false;
