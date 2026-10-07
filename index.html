@@ -143,6 +143,23 @@
     #doplata-block      { display: none; margin-bottom: 12px; }
     #work-variant-block { display: none; margin-bottom: 12px; }
     #contract-block     { display: none; margin-bottom: 12px; background: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
+    .contract-pdf-action {
+      display: flex; align-items: center; justify-content: center; box-sizing: border-box;
+      width: 100%; min-height: 44px; margin: 0; padding: 11px 14px;
+      border: none; border-radius: 8px; background: #2481cc; color: #fff;
+      font-family: Arial, sans-serif; font-size: 14px; font-weight: 600; line-height: 1.4;
+      text-align: center; text-decoration: none; cursor: pointer;
+    }
+    .contract-pdf-action:disabled { opacity: .65; cursor: wait; }
+    .contract-pdf-action:focus-visible { outline: 3px solid #9dcdf4; outline-offset: 2px; }
+    #cg-download-result {
+      margin: 20px 0 18px; padding: 16px; border: 1px solid #dbe7f2; border-radius: 10px;
+      background: #f5f9fd; font-family: Arial, sans-serif;
+    }
+    .contract-pdf-title { margin-bottom: 8px; color: #24425c; font-size: 14px; font-weight: 600; line-height: 1.5; }
+    #cg-download-status { margin-bottom: 10px; color: #526477; font-size: 13px; line-height: 1.5; }
+    #cg-download-filename { margin-bottom: 16px; color: #748293; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+    .contract-pdf-actions { display: grid; gap: 10px; }
     #ds-generate-block  { display: none; margin-top: 10px; padding: 12px; background: #f8f9fb; border-radius: 8px; border: 1px solid #e0e0e0; }
 
     .doplata-order-select { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; margin-bottom: 10px; }
@@ -416,12 +433,15 @@
       <div class="form-group"><label>Конец работ</label><input type="date" id="cg-end"></div>
       <div class="form-group"><label>Сумма ИТОГО</label><input type="text" id="cg-price" placeholder="100 000"></div>
       <div class="form-group"><label>Аванс %</label><input type="text" id="cg-adv" value="30"></div>
-      <button type="button" class="btn" id="cg-download">📥 Скачать договор (без заявки)</button>
-      <div id="cg-download-result" style="display:none;margin-top:12px;">
-        <div id="cg-download-status"></div>
-        <button type="button" class="btn" id="cg-save-pdf">💾 Сохранить PDF</button>
-        <a id="cg-pdf-link" target="_blank" rel="noopener">Открыть договор на Google Drive</a>
-        <small style="display:block;">Выбор папки зависит от Telegram и устройства. PDF также приходит в личный чат.</small>
+      <button type="button" class="contract-pdf-action" id="cg-download">📥 Скачать договор (без заявки)</button>
+      <div id="cg-download-result" style="display:none;">
+        <div class="contract-pdf-title">✅ Договор создан без заявки</div>
+        <div id="cg-download-status" role="status" aria-live="polite"></div>
+        <div id="cg-download-filename"></div>
+        <div class="contract-pdf-actions">
+          <button type="button" class="contract-pdf-action" id="cg-save-pdf">💾 Сохранить PDF</button>
+          <a class="contract-pdf-action" id="cg-pdf-link" target="_blank" rel="noopener">📁 Открыть на Google Drive</a>
+        </div>
       </div>
       <div class="checkbox-row" id="cg-ks-row" style="display:none;">
         <input type="checkbox" id="cg-ks-checkbox" disabled>
@@ -1223,7 +1243,8 @@ document.getElementById('cg-download').addEventListener('click', async function(
       requestKey: standaloneContractRequest.requestKey, contract: contract });
     standaloneContractResult = result;
     document.getElementById('cg-download-result').style.display = 'block';
-    document.getElementById('cg-download-status').textContent = result.message + '\n' + result.filename;
+    document.getElementById('cg-download-status').textContent = 'PDF и ссылка отправлены в ваш личный Telegram.';
+    document.getElementById('cg-download-filename').textContent = result.filename;
     document.getElementById('cg-pdf-link').href = result.fileUrl;
     showAlert('✅ Договор готов. Нажмите «Сохранить PDF», чтобы выбрать способ сохранения. PDF также отправлен в личный Telegram.');
   } catch(err) { showAlert('❌ ' + err.message + '\nПри потере ответа повторите с теми же параметрами договора.'); }
