@@ -168,6 +168,8 @@
 
     .maintenance-only { display: none; }
     .maintenance-work-only, .maintenance-purchase-only { display: none; }
+    .purchase-item { padding: 12px; border: 1px solid #dbe3ea; border-radius: 8px; margin-bottom: 12px; background: #f8fafc; }
+    input[type="date"] { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
     .maintenance-pair { padding: 12px; margin-bottom: 10px; border: 1px solid #dbe3ea; border-radius: 8px; background: #f8fafc; }
     .maintenance-pair-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 12px; font-weight: bold; color: #555; }
     .remove-maintenance-pair { border: none; background: #dc3545; color: #fff; border-radius: 5px; padding: 5px 9px; cursor: pointer; }
@@ -441,18 +443,20 @@
             <span class="doc-meta-status" id="doc-meta-status"></span>
           </div>
         </div>
-        <div class="form-group maintenance-purchase-only">
-          <label>Поставщик *</label>
-          <input type="text" id="maintenance-supplier" autocomplete="off" placeholder="Наименование поставщика">
-        </div>
-        <div class="form-group">
+        <div class="form-group maintenance-work-only">
           <label>Сумма *</label>
           <input type="text" id="maintenance-amount" inputmode="decimal" placeholder="100 000">
         </div>
-        <div id="maintenance-pairs"></div>
-        <button type="button" class="add-maintenance-pair" id="add-maintenance-pair">＋ Добавить филиал и ссылку</button>
+        <div class="maintenance-work-only">
+          <div id="maintenance-pairs"></div>
+          <button type="button" class="add-maintenance-pair" id="add-maintenance-pair">＋ Добавить филиал и ссылку</button>
+        </div>
+        <div class="maintenance-purchase-only">
+          <div id="purchase-items"></div>
+          <button type="button" class="add-maintenance-pair" id="add-purchase-item">＋ Добавить отдельный закуп</button>
+        </div>
       </div>
-      <div class="form-group">
+      <div class="form-group" id="common-documents">
         <label>📎 Документы (можно выбрать сразу несколько файлов)</label>
         <input type="file" id="mass-files" multiple>
       </div>
@@ -646,7 +650,9 @@ async function postJson(payload) {
     throw new Error('Сервер вернул не JSON: ' + text.substring(0, 160));
   }
   if (!result || result.status !== 'ok') {
-    throw new Error((result && result.message) || 'Операция не подтверждена сервером');
+    var serverError = new Error((result && result.message) || 'Операция не подтверждена сервером');
+    serverError.serverResult = result;
+    throw serverError;
   }
   return result;
 }
@@ -728,12 +734,71 @@ document.getElementById('btn-mode-project').addEventListener('click', function()
 document.getElementById('btn-mode-maintenance-work').addEventListener('click', function() { selectRequestMode('maintenance_work'); });
 document.getElementById('btn-mode-maintenance-purchase').addEventListener('click', function() { selectRequestMode('maintenance_purchase'); });
 document.getElementById('add-maintenance-pair').addEventListener('click', function() { addMaintenancePair(); });
+document.getElementById('add-purchase-item').addEventListener('click', function() { addPurchaseItem(); });
+
+var purchaseBatchKey = '';
+var pendingPurchasePayload = null;
+function addPurchaseItem() {
+  if (purchaseBatchKey) { showAlert('Сначала завершите текущую отправку закупов.'); return; }
+  var item = document.createElement('div');
+  item.className = 'purchase-item';
+  item.innerHTML = '<div class="maintenance-pair-head"><span>Отдельный закуп</span><button type="button" class="remove-maintenance-pair">×</button></div>' +
+    '<div class="form-group"><label>Договор</label><input type="text" class="purchase-contract" placeholder="Номер и дата договора (если есть)"></div>' +
+    '<div class="form-group"><label>Поставщик *</label><input type="text" class="purchase-supplier" autocomplete="off" placeholder="Наименование поставщика"></div>' +
+    '<div class="form-group"><label>Сумма *</label><input type="text" class="purchase-amount" inputmode="decimal" placeholder="100 000"></div>' +
+    '<div class="form-group"><label>Филиал *</label><input type="text" class="purchase-branch" placeholder="Название филиала"></div>' +
+    '<div class="form-group"><label>Ссылка на заявку *</label><input type="text" class="purchase-url" placeholder="https://ecosystem.dns-shop.ru/crm/type/145/details/4849/"></div>' +
+    '<div class="form-group"><label>Документы (включая файл договора)</label><input type="file" class="purchase-files" multiple></div>' +
+    '<div class="form-group"><label>Ожидаемая дата поставки *</label><input type="date" class="purchase-date"></div>';
+  item.querySelector('.remove-maintenance-pair').addEventListener('click', function() {
+    if (purchaseBatchKey) { showAlert('Сначала завершите текущую отправку закупов.'); return; }
+    item.remove();
+    if (!document.querySelector('#purchase-items .purchase-item')) addPurchaseItem();
+  });
+  document.getElementById('purchase-items').appendChild(item);
+}
+
+async function collectPurchaseItems() {
+  var items = [];
+  var elements = document.querySelectorAll('#purchase-items .purchase-item');
+  for (var i = 0; i < elements.length; i++) {
+    var item = elements[i];
+    var supplier = item.querySelector('.purchase-supplier').value.trim();
+    var amount = item.querySelector('.purchase-amount').value.trim().replace(/\s/g, '').replace(',', '.');
+    var branch = item.querySelector('.purchase-branch').value.trim();
+    var requestUrl = item.querySelector('.purchase-url').value.trim();
+    var deliveryDate = item.querySelector('.purchase-date').value;
+    if (!supplier || !branch || !deliveryDate) throw new Error('Заполните поставщика, филиал и дату в закупе №' + (i + 1));
+    if (deliveryDate < new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString().slice(0, 10)) throw new Error('Дата поставки не может быть в прошлом: закуп №' + (i + 1));
+    if (!/^\d+(?:\.\d{1,2})?$/.test(amount) || Number(amount) <= 0) throw new Error('Некорректная сумма в закупе №' + (i + 1));
+    if (!/^https:\/\/ecosystem\.dns-shop\.ru\/crm\/type\/145\/details\/\d+\/?(?:[?#].*)?$/i.test(requestUrl)) throw new Error('Некорректная ссылка в закупе №' + (i + 1));
+    var files = [];
+    var selectedFiles = item.querySelector('.purchase-files').files;
+    for (var f = 0; f < selectedFiles.length; f++) {
+      files.push({ name: selectedFiles[f].name, data: await readPurchaseFile(selectedFiles[f]) });
+    }
+    items.push({ supplier: supplier, amount: amount, contract: item.querySelector('.purchase-contract').value.trim(),
+      branch: branch, requestUrl: requestUrl, deliveryDate: deliveryDate, files: files });
+  }
+  if (!items.length || items.length > 30) throw new Error('Добавьте от 1 до 30 закупов');
+  return items;
+}
+
+function readPurchaseFile(file) {
+  return new Promise(function(resolve, reject) {
+    var reader = new FileReader();
+    reader.onload = function() { resolve(reader.result); };
+    reader.onerror = function() { reject(new Error('Не удалось прочитать ' + file.name)); };
+    reader.readAsDataURL(file);
+  });
+}
 
 function isMaintenanceMode() {
   return currentRequestMode === 'maintenance_work' || currentRequestMode === 'maintenance_purchase';
 }
 
 function selectRequestMode(mode) {
+  if (purchaseBatchKey && mode !== currentRequestMode) { showAlert('Сначала повторите отправку текущих закупов.'); return; }
   currentRequestMode = mode || 'project';
   document.querySelectorAll('#request-mode-buttons .btn').forEach(function(btn) { btn.classList.remove('active'); });
   var activeId = currentRequestMode === 'maintenance_work'
@@ -757,6 +822,7 @@ function selectRequestMode(mode) {
   }
 
   if (currentRequestMode === 'maintenance_purchase') {
+    if (!document.querySelector('#purchase-items .purchase-item')) addPurchaseItem();
     currentSub = '';
     resetWorkVariantButtons();
     document.getElementById('work-variant-block').style.display = 'none';
@@ -765,6 +831,8 @@ function selectRequestMode(mode) {
   } else if (currentMain) {
     document.getElementById('work-variant-block').style.display = 'block';
   }
+  document.getElementById('common-documents').style.display = currentRequestMode === 'maintenance_purchase' ? 'none' : 'block';
+  document.getElementById('contract-block').style.display = currentRequestMode !== 'maintenance_purchase' && (currentMain === 'status1' || currentMain === 'status3') ? 'block' : 'none';
 
   if (currentMain === 'status2') {
     document.getElementById('doplata-block').style.display = maintenance ? 'none' : 'block';
@@ -818,6 +886,7 @@ document.getElementById('btn-status2').addEventListener('click', function() { se
 document.getElementById('btn-status3').addEventListener('click', function() { selectMain('status3'); });
 
 function selectMain(type) {
+  if (purchaseBatchKey && type !== currentMain) { showAlert('Сначала повторите отправку текущих закупов.'); return; }
   currentMain = type;
   currentSub  = '';
   currentLinkedContractMeta = null;
@@ -839,8 +908,8 @@ function selectMain(type) {
 
   if (type === 'status1') {
     document.getElementById('work-variant-block').style.display = currentRequestMode === 'maintenance_purchase' ? 'none' : 'block';
-    document.getElementById('contract-block').style.display     = 'block';
-    loadDocMeta('cg-contractor', 'cg-signer');
+    document.getElementById('contract-block').style.display = currentRequestMode === 'maintenance_purchase' ? 'none' : 'block';
+    if (currentRequestMode !== 'maintenance_purchase') loadDocMeta('cg-contractor', 'cg-signer');
     document.getElementById('form-fields').classList.add('active');
   } else if (type === 'status2') {
     document.getElementById('doplata-block').style.display      = isMaintenanceMode() ? 'none' : 'block';
@@ -849,8 +918,8 @@ function selectMain(type) {
     document.getElementById('form-fields').classList.add('active');
   } else if (type === 'status3') {
     document.getElementById('work-variant-block').style.display = currentRequestMode === 'maintenance_purchase' ? 'none' : 'block';
-    document.getElementById('contract-block').style.display     = 'block';
-    loadDocMeta('cg-contractor', 'cg-signer');
+    document.getElementById('contract-block').style.display = currentRequestMode === 'maintenance_purchase' ? 'none' : 'block';
+    if (currentRequestMode !== 'maintenance_purchase') loadDocMeta('cg-contractor', 'cg-signer');
     document.getElementById('form-fields').classList.add('active');
   }
 }
@@ -1230,6 +1299,42 @@ document.getElementById('megaForm').addEventListener('submit', async function(e)
   e.preventDefault();
 
   if (!currentMain) { showAlert('Выберите тип оплаты!'); return; }
+  if (currentRequestMode === 'maintenance_purchase') {
+    var purchaseButton = document.getElementById('submit-new');
+    purchaseButton.disabled = true;
+    purchaseButton.textContent = '⏳ Отправка закупов...';
+    try {
+      if (!pendingPurchasePayload) {
+        var purchaseItems = await collectPurchaseItems();
+        purchaseBatchKey = 'batch_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+        pendingPurchasePayload = { mode: 'newPurchases', paymentType: currentMain, batchKey: purchaseBatchKey, purchaseItems: purchaseItems };
+      }
+      document.querySelectorAll('#purchase-items input, #purchase-items button, #add-purchase-item').forEach(function(control) { control.disabled = true; });
+      var purchaseResult = await postJson(pendingPurchasePayload);
+      purchaseBatchKey = '';
+      pendingPurchasePayload = null;
+      document.getElementById('add-purchase-item').disabled = false;
+      invalidateOrdersCache();
+      showAlert('✅ Созданы закупы: ' + purchaseResult.orderIds.join(', '));
+      document.getElementById('purchase-items').innerHTML = '';
+      this.reset();
+      currentMain = ''; currentSub = '';
+      document.getElementById('form-fields').classList.remove('active');
+      document.querySelectorAll('#payment-type-buttons .btn').forEach(function(b) { b.classList.remove('active'); });
+      selectRequestMode('project');
+      showScreen('screen-menu');
+    } catch(err) {
+      if (err.serverResult && !err.serverResult.batchStarted) {
+        purchaseBatchKey = ''; pendingPurchasePayload = null;
+        document.querySelectorAll('#purchase-items input, #purchase-items button, #add-purchase-item').forEach(function(control) { control.disabled = false; });
+      }
+      showAlert('❌ ' + err.message + (purchaseBatchKey ? '\nПовторите отправку тех же блоков.' : ''));
+    } finally {
+      purchaseButton.disabled = false;
+      purchaseButton.textContent = '📤 Отправить заявку';
+    }
+    return;
+  }
   if (currentRequestMode !== 'maintenance_purchase' && !currentSub) {
     showAlert('Выберите вариант исполнения!');
     return;
@@ -1241,9 +1346,7 @@ document.getElementById('megaForm').addEventListener('submit', async function(e)
   var maintenanceItems = [];
 
   if (isMaintenanceMode()) {
-    contractorValue = currentRequestMode === 'maintenance_purchase'
-      ? document.getElementById('maintenance-supplier').value.trim()
-      : document.getElementById('maintenance-contractor').value.trim();
+    contractorValue = document.getElementById('maintenance-contractor').value.trim();
     maintenanceAmount = document.getElementById('maintenance-amount').value.trim();
     if (!contractorValue) {
       showAlert(currentRequestMode === 'maintenance_purchase' ? 'Укажите поставщика!' : 'Выберите подрядчика!');
@@ -1563,9 +1666,25 @@ function renderOrders(orders) {
         '<button class="submit-btn gm-save-btn" data-id="' + order.id + '">Сохранить</button>' +
       '</div>' : '';
 
-    card.innerHTML = cardBody + avansBlock + zakrBlock + footer + gmBlock;
+    var deliveryBlock = '';
+    if (order.sourceSheet === 'ОБС Закуп') {
+      deliveryBlock = '<div class="gm-block"><b>📦 Поставка</b><br>' +
+        'Ожидаемая дата: ' + (order.deliveryDate ? formatDateRu(order.deliveryDate) : 'не указана') + '<br>' +
+        'Состояние: ' + (order.deliveryState || 'Ожидается') + '<br>';
+      if (order.canManageDelivery && order.deliveryState !== 'Поступило') {
+        deliveryBlock += '<div class="order-card-footer">' +
+          '<button type="button" class="link-btn green delivery-action" data-action="yes" data-id="' + order.id + '" data-revision="' + order.deliveryRevision + '">✅ Поступило</button>' +
+          '<button type="button" class="link-btn orange delivery-action" data-action="no" data-id="' + order.id + '" data-revision="' + order.deliveryRevision + '">Нет</button></div>' +
+          '<label>Новая дата поставки</label><input type="date" class="delivery-new-date" value="' + (order.deliveryDate || '') + '">' +
+          '<button type="button" class="link-btn delivery-action" data-action="date" data-id="' + order.id + '" data-revision="' + order.deliveryRevision + '">Сменить дату</button>';
+      }
+      deliveryBlock += '</div>';
+    }
+    card.innerHTML = cardBody + deliveryBlock + avansBlock + zakrBlock + footer + gmBlock;
     list.appendChild(card);
   });
+
+  bindDeliveryActions(list);
 
   list.querySelectorAll('.fix-btn').forEach(function(b) {
     b.addEventListener('click', function() {
@@ -1840,7 +1959,29 @@ function fillMaintenanceContractorHints() {
     opt.value = c.display;
     dataList.appendChild(opt);
   });
+
   setMaintenanceContractorPlaceholder('Начните вводить название подрядчика');
+}
+
+function bindDeliveryActions(list) {
+  list.querySelectorAll('.delivery-action').forEach(function(button) {
+    button.addEventListener('click', async function() {
+      var action = this.dataset.action;
+      var dateInput = this.closest('.gm-block').querySelector('.delivery-new-date');
+      if (action === 'date' && (!dateInput || !dateInput.value)) { showAlert('Укажите новую дату'); return; }
+      if (action === 'yes' && !window.confirm('Подтвердить поступление этого закупа?')) return;
+      var controls = this.closest('.gm-block').querySelectorAll('button');
+      controls.forEach(function(control) { control.disabled = true; });
+      try {
+        var result = await postJson({ mode: 'deliveryAction', orderId: this.dataset.id, revision: Number(this.dataset.revision),
+          action: action, deliveryDate: action === 'date' ? dateInput.value : '' });
+        invalidateOrdersCache();
+        showAlert(result.message);
+        await loadOrders(true);
+      } catch(err) { showAlert('❌ ' + err.message); }
+      finally { controls.forEach(function(control) { control.disabled = false; }); }
+    });
+  });
 }
 
 function fillDocSelects(contractorSelect, signerSelect) {
