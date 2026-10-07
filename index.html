@@ -416,6 +416,13 @@
       <div class="form-group"><label>Конец работ</label><input type="date" id="cg-end"></div>
       <div class="form-group"><label>Сумма ИТОГО</label><input type="text" id="cg-price" placeholder="100 000"></div>
       <div class="form-group"><label>Аванс %</label><input type="text" id="cg-adv" value="30"></div>
+      <button type="button" class="btn" id="cg-download">📥 Скачать договор (без заявки)</button>
+      <div id="cg-download-result" style="display:none;margin-top:12px;">
+        <div id="cg-download-status"></div>
+        <button type="button" class="btn" id="cg-save-pdf">💾 Сохранить PDF</button>
+        <a id="cg-pdf-link" target="_blank" rel="noopener">Открыть договор на Google Drive</a>
+        <small style="display:block;">Выбор папки зависит от Telegram и устройства. PDF также приходит в личный чат.</small>
+      </div>
       <div class="checkbox-row" id="cg-ks-row" style="display:none;">
         <input type="checkbox" id="cg-ks-checkbox" disabled>
         <label for="cg-ks-checkbox"><s style="color:#c0392b;">Оформить КС-2/КС-3?</s> <span style="color:#c0392b;font-size:11px;">(в разработке)</span></label>
@@ -1181,6 +1188,84 @@ document.getElementById('cg-contractor').addEventListener('change', function() {
   setPrimaryContractor(this.value);
 });
 
+var standaloneContractRequest = null;
+var standaloneContractResult = null;
+
+function collectStandaloneContract() {
+  if (currentRequestMode === 'maintenance_purchase') throw new Error('Договоры в закупе не формируются');
+  if (!currentSub) throw new Error('Выберите вариант исполнения: иждивение или давальческое');
+  var value = function(id) { return document.getElementById(id).value.trim(); };
+  if (!value('cg-contractor') || !value('cg-signer') || !value('cg-num') || !value('cg-addr')) throw new Error('Заполните подрядчика, подписанта, номер договора и адрес объекта');
+  if (!value('cg-date') || !value('cg-start') || !value('cg-end')) throw new Error('Заполните даты договора и работ');
+  if (value('cg-end') < value('cg-start')) throw new Error('Конец работ не может быть раньше начала');
+  var amount = value('cg-price').replace(/\s/g, '').replace(',', '.');
+  if (!/^\d+(?:\.\d{1,2})?$/.test(amount) || Number(amount) <= 0) throw new Error('Укажите корректную сумму договора');
+  var advance = value('cg-adv').replace(',', '.');
+  if (!/^\d+(?:\.\d{1,2})?$/.test(advance) || Number(advance) > 100) throw new Error('Аванс должен быть от 0 до 100%');
+  return { workType: currentSub === 'давальческое' ? 'Давальческие' : 'Иждивение', nds: cgNds,
+    ndsRate: value('cg-nds-rate'), contractorKey: value('cg-contractor'), signerKey: value('cg-signer'),
+    workKind: value('cg-work-kind'), docNum: value('cg-num'), docDate: formatDateRu(value('cg-date')),
+    objAddress: value('cg-addr'), startDate: formatDateRu(value('cg-start')), endDate: formatDateRu(value('cg-end')),
+    price: amount, advPercent: advance };
+}
+
+document.getElementById('cg-download').addEventListener('click', async function() {
+  var button = this;
+  try {
+    var contract = collectStandaloneContract();
+    var signature = JSON.stringify(contract);
+    if (!standaloneContractRequest || standaloneContractRequest.signature !== signature) {
+      standaloneContractRequest = { signature: signature, requestKey: 'contract_' + Date.now() + '_' + Math.random().toString(36).slice(2) };
+      standaloneContractResult = null;
+    }
+    button.disabled = true; button.textContent = '⏳ Формирую PDF...';
+    var result = standaloneContractResult || await postJson({ mode: 'standaloneContract',
+      requestKey: standaloneContractRequest.requestKey, contract: contract });
+    standaloneContractResult = result;
+    document.getElementById('cg-download-result').style.display = 'block';
+    document.getElementById('cg-download-status').textContent = result.message + '\n' + result.filename;
+    document.getElementById('cg-pdf-link').href = result.fileUrl;
+    showAlert('✅ Договор готов. Нажмите «Сохранить PDF», чтобы выбрать способ сохранения. PDF также отправлен в личный Telegram.');
+  } catch(err) { showAlert('❌ ' + err.message + '\nПри потере ответа повторите с теми же параметрами договора.'); }
+  finally { button.disabled = false; button.textContent = '📥 Скачать договор (без заявки)'; }
+});
+
+function standalonePdfBlob(result) {
+  var binary = atob(result.pdfBase64);
+  var bytes = new Uint8Array(binary.length);
+  for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: 'application/pdf' });
+}
+
+document.getElementById('cg-save-pdf').addEventListener('click', async function() {
+  var result = standaloneContractResult;
+  if (!result) { showAlert('Сначала сформируйте договор'); return; }
+  try {
+    if (result.pdfBase64 && typeof window.showSaveFilePicker === 'function') {
+      var handle = await window.showSaveFilePicker({ suggestedName: result.filename,
+        types: [{ description: 'PDF', accept: { 'application/pdf': ['.pdf'] } }] });
+      var writable = await handle.createWritable();
+      await writable.write(standalonePdfBlob(result)); await writable.close();
+      showAlert('✅ PDF сохранён'); return;
+    }
+    if (tg && typeof tg.downloadFile === 'function' && (!tg.isVersionAtLeast || tg.isVersionAtLeast('8.0'))) {
+      tg.downloadFile({ url: result.downloadUrl, file_name: result.filename }, function(accepted) {
+        if (!accepted) showAlert('Скачивание не подтверждено. Сохраните PDF из личного чата или откройте ссылку на Google Drive.');
+      });
+      return;
+    }
+    if (result.pdfBase64) {
+      var url = URL.createObjectURL(standalonePdfBlob(result));
+      var link = document.createElement('a'); link.href = url; link.download = result.filename;
+      document.body.appendChild(link); link.click(); link.remove();
+      setTimeout(function() { URL.revokeObjectURL(url); }, 60000);
+    } else if (tg && tg.openLink) tg.openLink(result.fileUrl);
+    else window.open(result.fileUrl, '_blank');
+  } catch(err) {
+    if (err.name !== 'AbortError') showAlert('Не удалось сохранить через интерфейс. PDF доступен в личном Telegram и по ссылке Google Drive.');
+  }
+});
+
 var cgNds = 'С НДС';
 document.getElementById('cg-btn-nds').addEventListener('click', function() {
   cgNds = 'С НДС';
@@ -1830,7 +1915,7 @@ document.getElementById('fixForm').addEventListener('submit', async function(e) 
 });
 
 // ===== ЗАГРУЗКА СПИСКОВ ПОДРЯДЧИКОВ / ПОДПИСАНТОВ (двухуровневый кэш) =====
-const DOC_META_STORAGE_KEY = 'ilai_doc_meta_v2';
+const DOC_META_STORAGE_KEY = 'ilai_doc_meta_v3';
 const DOC_META_CACHE_TTL_MS = 60 * 60 * 1000;
 var docMetaCache = null;
 var docMetaLoadedAt = 0;
@@ -1844,6 +1929,10 @@ function normalizeDocMeta(result) {
     contractors: Array.isArray(result.contractors) ? result.contractors.map(function(c) {
       return { key: String(c.key || ''), display: String(c.display || c.key || '') };
     }).filter(function(c) { return c.key; }) : [],
+    maintenanceContractors: (Array.isArray(result.maintenanceContractors) ? result.maintenanceContractors : (result.contractors || [])).map(function(c) {
+      return { key: String(c.key || ''), display: String(c.display || c.key || '') };
+    }).filter(function(c) { return c.key; }),
+    maintenanceError: String(result.maintenanceError || ''),
     signers: Array.isArray(result.signers) ? result.signers.map(function(s) {
       return { key: String(s.key || ''), display: String(s.display || s.key || '') };
     }).filter(function(s) { return s.key; }) : [],
@@ -1981,13 +2070,14 @@ function fillMaintenanceContractorHints() {
   var dataList = document.getElementById('maintenance-contractor-options');
   if (!dataList || !docMetaCache || docMetaCache.status !== 'ok') return;
   dataList.innerHTML = '';
-  docMetaCache.contractors.forEach(function(c) {
+  docMetaCache.maintenanceContractors.forEach(function(c) {
     var opt = document.createElement('option');
     opt.value = c.display;
     dataList.appendChild(opt);
   });
 
   setMaintenanceContractorPlaceholder('Начните вводить название подрядчика');
+  if (docMetaCache.maintenanceError) setDocMetaStatus(docMetaCache.maintenanceError);
 }
 
 function bindDeliveryActions(list) {
