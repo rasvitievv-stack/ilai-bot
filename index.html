@@ -667,7 +667,12 @@ async function postJson(payload) {
   });
   var text = await resp.text();
 
-  if (!resp.ok) throw new Error('HTTP ' + resp.status + (text ? ': ' + text.substring(0, 160) : ''));
+  if (!resp.ok) {
+    var transportError = new Error('Сервер не подтвердил ответ (HTTP ' + resp.status + ').');
+    transportError.httpStatus = resp.status;
+    try { transportError.responseHost = new URL(resp.url).host; } catch(e) {}
+    throw transportError;
+  }
   if (!text || !text.trim()) throw new Error('Сервер вернул пустой ответ');
 
   var result;
@@ -792,6 +797,49 @@ document.getElementById('add-purchase-item').addEventListener('click', function(
 
 var purchaseBatchKey = '';
 var pendingPurchasePayload = null;
+var pendingWorkSubmission = null;
+async function sendWorkWithRecovery(payload) {
+  var signature = JSON.stringify(payload);
+  if (pendingWorkSubmission && pendingWorkSubmission.signature !== signature) {
+    throw new Error('Сначала проверьте прежнюю отправку. Верните прежние параметры; новая заявка не отправлена.');
+  }
+  if (!pendingWorkSubmission) pendingWorkSubmission = {
+    signature: signature, requestKey: 'work_' + Date.now() + '_' + Math.random().toString(36).slice(2)
+  };
+  payload.requestKey = pendingWorkSubmission.requestKey;
+  try {
+    var result = await postJson(payload);
+    pendingWorkSubmission = null;
+    return result;
+  } catch(err) {
+    if (err.serverResult && !err.serverResult.submissionStarted) {
+      pendingWorkSubmission = null;
+      throw err;
+    }
+    document.getElementById('submit-new').textContent = '⏳ Проверка созданной заявки...';
+    var state, checkError;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      if (attempt) await new Promise(function(resolve) { setTimeout(resolve, 1500); });
+      try {
+        state = await fetchJsonGet({ mode: 'workSubmissionStatus', requestKey: pendingWorkSubmission.requestKey }, 1);
+        if (state.submissionState === 'completed') {
+          pendingWorkSubmission = null;
+          return { status: 'ok', orderId: state.orderId };
+        }
+      } catch(readError) { checkError = readError; }
+    }
+    var message = state && state.orderId ? 'ID заявки: ' + state.orderId + '. ' : '';
+    message += state && state.submissionState === 'written'
+      ? 'Заявка записана; завершение уведомлений пока не подтверждено.'
+      : 'Не удалось подтвердить завершение. Это не означает, что заявка не создана.';
+    message += '\nНе закрывайте окно и не меняйте форму. Повтор использует прежний ключ и не создаёт вторую заявку на обновлённом сервере.';
+    message += '\nКлюч проверки: ' + pendingWorkSubmission.requestKey;
+    if (err.httpStatus) message += '\nHTTP ' + err.httpStatus + (err.responseHost ? ', ' + err.responseHost : '');
+    if (checkError) message += '\nПроверка недоступна: ' + checkError.message;
+    if (err.serverResult && err.serverResult.requestId) message += '\nКод диагностики: ' + err.serverResult.requestId;
+    throw new Error(message);
+  }
+}
 function addPurchaseItem() {
   if (purchaseBatchKey) { showAlert('Сначала завершите текущую отправку закупов.'); return; }
   var item = document.createElement('div');
@@ -1612,10 +1660,11 @@ document.getElementById('megaForm').addEventListener('submit', async function(e)
       payload.ksGenerate         = document.getElementById('dg-ks-checkbox').checked;
     }
 
-    await postJson(payload);
+    var submissionResult = currentRequestMode === 'maintenance_work'
+      ? await sendWorkWithRecovery(payload) : await postJson(payload);
     invalidateOrdersCache();
 
-    showAlert('✅ Заявка отправлена!\n\nПроверьте Telegram — придёт подтверждение с номером заявки.');
+    showAlert('✅ Заявка создана!' + (submissionResult.orderId ? '\nID: ' + submissionResult.orderId : '') + '\n\nПодтверждение отправлено в Telegram.');
     this.reset();
     document.getElementById('form-fields').classList.remove('active');
     document.getElementById('doplata-block').style.display      = 'none';
