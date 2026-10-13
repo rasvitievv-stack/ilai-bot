@@ -1102,11 +1102,18 @@ document.getElementById('doplata-order-select').addEventListener('change', funct
     document.getElementById('m15-group').style.display = 'none';
     document.getElementById('dg-prev-num-hint').style.display = 'none';
     document.getElementById('dg-end-date-hint').style.display = 'none';
+    document.getElementById('i-m15').value = '';
+    if (document.getElementById('ds-need-checkbox').checked) fillLinkedDsDefaults();
     return;
   }
 
   var order = cachedOrders.find(function(o) { return o.id === selectedId; });
-  if (!order) { infoBlock.style.display = 'none'; currentLinkedContractMeta = null; return; }
+  if (!order) {
+    infoBlock.style.display = 'none'; currentLinkedContractMeta = null;
+    document.getElementById('i-m15').value = '';
+    if (document.getElementById('ds-need-checkbox').checked) fillLinkedDsDefaults();
+    return;
+  }
 
   details.innerHTML =
     '<b>ID:</b> ' + order.id + '<br>' +
@@ -1156,6 +1163,8 @@ document.getElementById('doplata-order-select').addEventListener('change', funct
     resetWorkVariantButtons();
     document.getElementById('m15-group').style.display = 'none';
   }
+  document.getElementById('i-m15').value = currentSub === 'давальческое' && ['Есть', 'Нет'].indexOf(order.m15) >= 0 ? order.m15 : '';
+  if (document.getElementById('ds-need-checkbox').checked) fillLinkedDsDefaults();
 });
 
 // ===== ДС В ДОПЛАТЕ: ЧЕКБОКС "ТРЕБУЕТСЯ ДОП. СОГЛАШЕНИЕ?" =====
@@ -1166,31 +1175,52 @@ function resetDsGenerateCheckbox() {
   document.getElementById('dg-meta-hint').style.display = 'none';
 }
 
+function fillLinkedDsDefaults() {
+  var meta = currentLinkedContractMeta || {};
+  var missing = [];
+  function fill(id, value, label, date) {
+    var element = document.getElementById(id);
+    element.value = value ? (date ? ruDateToIso(String(value)) : value) : '';
+    if (!element.value) missing.push(label);
+  }
+  fill('dg-contractor', meta.contractorKey, 'подрядчик');
+  fill('dg-signer', meta.signerKey, 'подписант');
+  fill('dg-main-num', meta.docNum, 'номер основного договора');
+  fill('dg-main-date', meta.docDate, 'дата основного договора', true);
+  fill('dg-start', meta.startDate, 'начало работ', true);
+  fill('dg-end', meta.endDate, 'окончание работ', true);
+  if (meta.nds === 'Без НДС') {
+    document.getElementById('dg-btn-nonds').click();
+  } else if (meta.nds === 'С НДС') {
+    document.getElementById('dg-btn-nds').click();
+    fill('dg-nds-rate', String(meta.ndsRate || '').replace('%', '').trim(), 'ставка НДС');
+  } else {
+    dgNds = '';
+    document.getElementById('dg-btn-nonds').classList.remove('active');
+    document.getElementById('dg-btn-nds').classList.remove('active');
+    document.getElementById('dg-nds-rate').value = '';
+    missing.push('НДС');
+  }
+  var dateInput = document.getElementById('dg-date');
+  if (!dateInput.value) {
+    var parts = new Intl.DateTimeFormat('en', { timeZone: 'Europe/Moscow', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
+    function part(type) { return parts.find(function(p) { return p.type === type; }).value; }
+    dateInput.value = part('year') + '-' + part('month') + '-' + part('day');
+  }
+  var hint = document.getElementById('dg-meta-hint');
+  hint.textContent = missing.length
+    ? '⚠️ В данных связанного договора отсутствуют: ' + missing.join(', ') + '. Заполните вручную.'
+    : '✅ Реквизиты и сроки подставлены из основного договора. При необходимости измените их.';
+  hint.style.display = 'block';
+}
+
 document.getElementById('ds-need-checkbox').addEventListener('change', async function() {
   var block = document.getElementById('ds-generate-block');
   if (this.checked) {
     block.style.display = 'block';
     await loadDocMeta('dg-contractor', 'dg-signer');
-
-    if (currentLinkedContractMeta) {
-      if (currentLinkedContractMeta.contractorKey) {
-        document.getElementById('dg-contractor').value = currentLinkedContractMeta.contractorKey;
-      }
-      if (currentLinkedContractMeta.signerKey) {
-        document.getElementById('dg-signer').value = currentLinkedContractMeta.signerKey;
-      }
-      if (currentLinkedContractMeta.docNum)  document.getElementById('dg-main-num').value  = currentLinkedContractMeta.docNum;
-      if (currentLinkedContractMeta.docDate) document.getElementById('dg-main-date').value = ruDateToIso(currentLinkedContractMeta.docDate);
-
-      if (currentLinkedContractMeta.nds === 'Без НДС') {
-        document.getElementById('dg-btn-nonds').click();
-      } else {
-        document.getElementById('dg-btn-nds').click();
-        if (currentLinkedContractMeta.ndsRate) document.getElementById('dg-nds-rate').value = currentLinkedContractMeta.ndsRate;
-      }
-
-      document.getElementById('dg-meta-hint').style.display = 'block';
-    }
+    // За время загрузки пользователь мог выключить ДС или выбрать другую заявку.
+    if (this.checked) fillLinkedDsDefaults();
   } else {
     block.style.display = 'none';
   }
@@ -1582,6 +1612,7 @@ document.getElementById('megaForm').addEventListener('submit', async function(e)
 
   var dsGenerateChecked = currentRequestMode === 'project' && currentMain === 'status2' && document.getElementById('ds-need-checkbox').checked;
   if (dsGenerateChecked) {
+    if (!dgNds || (dgNds === 'С НДС' && !document.getElementById('dg-nds-rate').value)) { showAlert('Укажите НДС и ставку для ДС!'); return; }
     if (!document.getElementById('dg-contractor').value) { showAlert('Выберите подрядчика для ДС!'); return; }
     if (!document.getElementById('dg-signer').value)      { showAlert('Выберите подписанта для ДС!'); return; }
     if (!document.getElementById('dg-num').value.trim())  { showAlert('Укажите номер ДС!'); return; }
