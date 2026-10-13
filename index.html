@@ -840,6 +840,50 @@ async function sendWorkWithRecovery(payload) {
     throw new Error(message);
   }
 }
+var pendingDoplataSubmission = null;
+async function sendDoplataWithRecovery(payload) {
+  var signature = JSON.stringify(payload);
+  if (pendingDoplataSubmission && pendingDoplataSubmission.signature !== signature) {
+    throw new Error('Незавершённая доплата: верните прежние параметры и проверьте результат. Новая отправка не выполнена.');
+  }
+  if (!pendingDoplataSubmission) pendingDoplataSubmission = {
+    signature: signature, requestKey: 'doplata_' + Date.now() + '_' + Math.random().toString(36).slice(2)
+  };
+  payload.requestKey = pendingDoplataSubmission.requestKey;
+  try {
+    var result = await postJson(payload);
+    pendingDoplataSubmission = null;
+    return result;
+  } catch(err) {
+    if (err.serverResult && !err.serverResult.submissionStarted) {
+      pendingDoplataSubmission = null;
+      throw err;
+    }
+    document.getElementById('submit-new').textContent = '⏳ Проверка доплаты...';
+    var state, checkError;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      if (attempt) await new Promise(function(resolve) { setTimeout(resolve, 1500); });
+      try {
+        state = await fetchJsonGet({ mode: 'doplataSubmissionStatus', requestKey: pendingDoplataSubmission.requestKey }, 1);
+        if (state.submissionState === 'completed') {
+          pendingDoplataSubmission = null;
+          return { status: 'ok', orderId: state.orderId, warning: state.warning || '' };
+        }
+      } catch(readError) { checkError = readError; }
+    }
+    var message = 'Доплата по ID ' + payload.linkedOrderId + ': ';
+    message += state && state.written
+      ? 'таблица обновлена, но завершение уведомлений не подтверждено.'
+      : 'результат не подтверждён; документы или ДС могли уже создаться.';
+    message += '\nНе закрывайте окно и не меняйте форму. Повтор использует прежний ключ; на обновлённом сервере повторная генерация ДС заблокирована.';
+    message += '\nКлюч проверки: ' + pendingDoplataSubmission.requestKey;
+    if (err.httpStatus) message += '\nHTTP ' + err.httpStatus + (err.responseHost ? ', ' + err.responseHost : '');
+    if (checkError) message += '\nПроверка недоступна: ' + checkError.message;
+    if (err.serverResult && err.serverResult.requestId) message += '\nКод диагностики: ' + err.serverResult.requestId;
+    throw new Error(message);
+  }
+}
+
 function addPurchaseItem() {
   if (purchaseBatchKey) { showAlert('Сначала завершите текущую отправку закупов.'); return; }
   var item = document.createElement('div');
@@ -1692,10 +1736,15 @@ document.getElementById('megaForm').addEventListener('submit', async function(e)
     }
 
     var submissionResult = currentRequestMode === 'maintenance_work'
-      ? await sendWorkWithRecovery(payload) : await postJson(payload);
+      ? await sendWorkWithRecovery(payload)
+      : (currentRequestMode === 'project' && currentMain === 'status2' && linkedOrderId && linkedOrderId !== '__none__'
+        ? await sendDoplataWithRecovery(payload) : await postJson(payload));
     invalidateOrdersCache();
 
-    showAlert('✅ Заявка создана!' + (submissionResult.orderId ? '\nID: ' + submissionResult.orderId : '') + '\n\nПодтверждение отправлено в Telegram.');
+    var isLinkedDoplata = currentRequestMode === 'project' && currentMain === 'status2' && linkedOrderId && linkedOrderId !== '__none__';
+    showAlert((isLinkedDoplata ? '✅ Доплата обработана!' : '✅ Заявка создана!') +
+      (submissionResult.orderId ? '\nID: ' + submissionResult.orderId : '') + '\n\nПодтверждение отправлено в Telegram.' +
+      (submissionResult.warning ? '\n\n⚠️ ' + submissionResult.warning : ''));
     this.reset();
     document.getElementById('form-fields').classList.remove('active');
     document.getElementById('doplata-block').style.display      = 'none';
