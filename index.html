@@ -232,9 +232,24 @@
       resize: vertical;
       box-sizing: border-box;
     }
+    #draft-exit-dialog { margin:auto; width:calc(100% - 32px); max-width:360px; padding:22px; border:0; border-radius:14px; color:#253649; box-shadow:0 12px 40px #0003; }
+    #draft-exit-dialog::backdrop { background:rgba(24,39,56,.4); }
+    #draft-exit-dialog p { font-size:17px; line-height:1.5; margin-bottom:22px; }
+    .draft-exit-actions { display:flex; gap:12px; }
+    .draft-exit-actions button { flex:1; padding:12px; border:0; border-radius:8px; font-size:16px; cursor:pointer; background:#e9eef4; color:#253649; }
+    #draft-exit-yes { background:#2786cc; color:white; }
   </style>
 </head>
 <body>
+<dialog id="draft-exit-dialog" aria-labelledby="draft-exit-question">
+  <form method="dialog">
+    <p id="draft-exit-question">Сохранить заполненную заявку в черновики?</p>
+    <div class="draft-exit-actions">
+      <button id="draft-exit-yes" value="yes" autofocus>Да</button>
+      <button id="draft-exit-no" value="no">Нет</button>
+    </div>
+  </form>
+</dialog>
 
 <!-- ЭКРАН 1: МЕНЮ -->
 <div id="screen-menu" class="screen active">
@@ -2565,17 +2580,31 @@ async function saveCurrentDraft() {
   finally { unfreeze(); draftBusy = false; }
 }
 
+function askDraftExitChoice() {
+  var dialog = document.getElementById('draft-exit-dialog');
+  return new Promise(function(resolve) {
+    dialog.returnValue = '';
+    dialog.addEventListener('close', function() { resolve(dialog.returnValue); }, {once:true});
+    dialog.showModal();
+  });
+}
+
+var draftExitInProgress = false;
 async function leaveDraftForm() {
-  if (draftBusy) return;
+  if (draftBusy || draftExitInProgress) return;
   if (draftSubmissionPending() && !draftReadOnly) { showAlert('Сначала завершите или проверьте отправку заявки.'); return; }
+  draftExitInProgress = true;
+  try {
   if (draftDirty && !draftReadOnly) {
-    if (window.confirm('Сохранить заполненную заявку в черновики?')) { if (!await saveCurrentDraft()) return; }
-    else if (!window.confirm('Выйти без сохранения последних изменений?')) return;
+    var choice = await askDraftExitChoice();
+    if (choice === 'yes') { if (!await saveCurrentDraft()) return; }
+    else if (choice !== 'no') return;
   }
   draftDirty = false; draftEpoch++; clearTimeout(draftRecoveryTimer);
   await draftRecoveryQueue.catch(function() {});
   await draftRecoveryStore('delete').catch(function() {});
   resetDraftForm(); showScreen('screen-menu');
+  } finally { draftExitInProgress = false; }
 }
 
 async function startNewDraftForm() {
