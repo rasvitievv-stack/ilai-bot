@@ -365,6 +365,10 @@
       <div class="form-group">
         <label>Подрядчик</label>
         <select id="dg-contractor"><option value="">⏳ Загрузка...</option></select>
+        <div class="doc-meta-actions">
+          <button type="button" class="doc-meta-refresh" id="dg-refresh-doc-meta">🔄 Обновить список</button>
+          <span class="doc-meta-status" role="status"></span>
+        </div>
       </div>
       <div class="form-group">
         <label>Наш подписант</label>
@@ -447,6 +451,10 @@
       <div class="form-group">
         <label>Подрядчик (для договора)</label>
         <select id="cg-contractor"><option value="">⏳ Загрузка...</option></select>
+        <div class="doc-meta-actions">
+          <button type="button" class="doc-meta-refresh" id="cg-refresh-doc-meta">🔄 Обновить список</button>
+          <span class="doc-meta-status" role="status"></span>
+        </div>
       </div>
       <div class="form-group">
         <label>Наш подписант</label>
@@ -2171,8 +2179,7 @@ function saveDocMetaCache(result) {
 }
 
 function setDocMetaStatus(text) {
-  var status = document.getElementById('doc-meta-status');
-  if (status) status.textContent = text || '';
+  document.querySelectorAll('.doc-meta-status').forEach(function(status) { status.textContent = text || ''; });
 }
 
 function setMaintenanceContractorPlaceholder(text) {
@@ -2258,17 +2265,20 @@ async function loadDocMeta(contractorSelectId, signerSelectId) {
   }
 }
 
-document.getElementById('refresh-doc-meta').addEventListener('click', async function() {
-  var btn = this;
-  btn.disabled = true;
+document.querySelectorAll('.doc-meta-refresh').forEach(function(button) {
+button.addEventListener('click', async function() {
+  var buttons = Array.prototype.slice.call(document.querySelectorAll('.doc-meta-refresh'));
+  var previous = buttons.map(function(btn) { return btn.disabled; });
+  buttons.forEach(function(btn) { btn.disabled = true; });
   try {
     await refreshDocMeta(true);
   } catch(err) {
     setDocMetaStatus('Ошибка обновления');
     showAlert('❌ Не удалось обновить список: ' + err.message);
   } finally {
-    btn.disabled = false;
+    buttons.forEach(function(btn, index) { btn.disabled = previous[index] || draftReadOnly; });
   }
+});
 });
 
 function fillMaintenanceContractorHints() {
@@ -2716,6 +2726,7 @@ document.getElementById('screen-new').addEventListener('change', function(event)
 });
 document.getElementById('screen-new').addEventListener('click', function(event) {
   var button = event.target.closest('button');
+  if (button && button.classList.contains('doc-meta-refresh')) return;
   if (button && !['back-from-new','save-draft','submit-new','refresh-doc-meta','cg-download','cg-save-pdf'].includes(button.id)) markDraftDirty();
 });
 window.addEventListener('beforeunload', function(event) { if (draftDirty && !draftReadOnly) { event.preventDefault(); event.returnValue = ''; } });
