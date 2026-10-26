@@ -2113,7 +2113,7 @@ var docMetaRefreshTimer = null;
 
 function normalizeDocMeta(result) {
   if (!result || result.status !== 'ok') throw new Error('Получен некорректный справочник');
-  return {
+  var normalized = {
     status: 'ok',
     contractors: Array.isArray(result.contractors) ? result.contractors.map(function(c) {
       return { key: String(c.key || ''), display: String(c.display || c.key || ''),
@@ -2128,6 +2128,19 @@ function normalizeDocMeta(result) {
     }).filter(function(s) { return s.key; }) : [],
     generatedAt: Number(result.generatedAt) || Date.now()
   };
+  if (!normalized.contractors.length || !normalized.signers.length) {
+    var error = new Error(!normalized.contractors.length
+      ? 'Список подрядчиков пуст. Нажмите «Обновить список».'
+      : 'Список подписантов пуст. Нажмите «Обновить список».');
+    error.code = 'EMPTY_DOC_META';
+    throw error;
+  }
+  return normalized;
+}
+
+function isDocMetaReady(meta) {
+  return !!(meta && meta.status === 'ok' && Array.isArray(meta.contractors) && meta.contractors.length &&
+    Array.isArray(meta.signers) && meta.signers.length);
 }
 
 function applyContractorVatDefault(prefix, contractorKey) {
@@ -2154,7 +2167,9 @@ function applyContractorVatDefault(prefix, contractorKey) {
 }
 
 function restoreDocMetaCache() {
-  if (docMetaCache) return true;
+  if (isDocMetaReady(docMetaCache)) return true;
+  docMetaCache = null;
+  docMetaLoadedAt = 0;
   try {
     var saved = JSON.parse(localStorage.getItem(DOC_META_STORAGE_KEY) || 'null');
     if (!saved || !saved.data) return false;
@@ -2179,7 +2194,15 @@ function saveDocMetaCache(result) {
 }
 
 function setDocMetaStatus(text) {
-  document.querySelectorAll('.doc-meta-status').forEach(function(status) { status.textContent = text || ''; });
+  document.querySelectorAll('.doc-meta-status').forEach(function(status) {
+    var summary = '';
+    if (isDocMetaReady(docMetaCache)) {
+      summary = status.id === 'doc-meta-status'
+        ? 'Загружено подрядчиков: ' + docMetaCache.maintenanceContractors.length
+        : 'Загружено подрядчиков: ' + docMetaCache.contractors.length + ' · подписантов: ' + docMetaCache.signers.length;
+    }
+    status.textContent = [text, summary].filter(Boolean).join(' · ');
+  });
 }
 
 function setMaintenanceContractorPlaceholder(text) {
@@ -2217,13 +2240,22 @@ async function refreshDocMeta(forceRefresh) {
       var result = forceRefresh
         ? await postJson({ mode: 'refreshDocMeta' })
         : await fetchJsonGet({ mode: 'getDocMeta' }, 2);
-      saveDocMetaCache(result);
+      try { saveDocMetaCache(result); }
+      catch(validationError) {
+        // Пустой серверный кэш перечитываем из таблиц только один раз.
+        if (forceRefresh || validationError.code !== 'EMPTY_DOC_META') throw validationError;
+        setDocMetaStatus('Перечитываем справочник…');
+        result = await postJson({ mode: 'refreshDocMeta' });
+        saveDocMetaCache(result);
+      }
       fillAllDocMetaControls();
       setDocMetaStatus(forceRefresh ? 'Список обновлён' : '');
       scheduleDocMetaRefresh();
       return docMetaCache;
     } catch(err) {
-      setDocMetaStatus('Не удалось обновить');
+      setDocMetaStatus(isDocMetaReady(docMetaCache)
+        ? 'Не удалось обновить. Сохранённый список доступен'
+        : err.message || 'Не удалось загрузить справочник');
       if (!docMetaCache) setMaintenanceContractorPlaceholder('Введите название вручную');
       if (docMetaRefreshTimer) clearTimeout(docMetaRefreshTimer);
       docMetaRefreshTimer = setTimeout(function() {
@@ -2243,9 +2275,10 @@ async function loadDocMeta(contractorSelectId, signerSelectId) {
   var contractorSelect = contractorSelectId ? document.getElementById(contractorSelectId) : null;
   var signerSelect      = signerSelectId ? document.getElementById(signerSelectId) : null;
 
-  if (docMetaCache || restoreDocMetaCache()) {
+  if (restoreDocMetaCache()) {
     fillDocSelects(contractorSelect, signerSelect);
     fillMaintenanceContractorHints();
+    setDocMetaStatus('');
     scheduleDocMetaRefresh();
     if (Date.now() - docMetaLoadedAt >= DOC_META_CACHE_TTL_MS) {
       refreshDocMeta(false).catch(function() { setDocMetaStatus('Не удалось обновить'); });
