@@ -867,6 +867,21 @@ async function sendWorkWithRecovery(payload) {
   }
 }
 var pendingDoplataSubmission = null;
+function scheduleDoplataVerification(check) {
+  setTimeout(async function() {
+    if (String(tgId) !== check.userId) return;
+    try {
+      var result = await postJson({mode:'verifyDoplataSubmission', requestKey:check.requestKey, linkedOrderId:check.orderId});
+      if (result.confirmed && check.draft && check.draft.version) {
+        try { await postJson({mode:'deleteDraft', draftId:check.draft.id, version:check.draft.version}); } catch(ignore) {}
+      }
+      if (result.notificationFailed) showAlert('⚠️ Возможно, что-то пошло не так. Уточните у ответственного, создалась ли доплата по заявке №' + check.orderId + '. Повторно отправлять её пока не нужно.');
+    } catch(err) {
+      showAlert('⚠️ Не удалось перепроверить доплату по заявке №' + check.orderId + '. Уточните у ответственного, создалась ли заявка и появились ли документы. Повторно отправлять её пока не нужно.');
+    }
+  }, 30000);
+}
+
 async function sendDoplataWithRecovery(payload) {
   var signature = JSON.stringify(payload);
   if (pendingDoplataSubmission && pendingDoplataSubmission.signature !== signature) {
@@ -882,32 +897,16 @@ async function sendDoplataWithRecovery(payload) {
     pendingDoplataSubmission = null;
     return result;
   } catch(err) {
-    if (err.serverResult && !err.serverResult.submissionStarted) {
+    // Ошибки до начала обработки остаются ошибками, неподтверждённый ответ — нет.
+    if (err.serverResult && (err.serverResult.submissionStarted === false ||
+        (!err.serverResult.submissionStarted && !err.serverResult.requestId))) {
       pendingDoplataSubmission = null;
       throw err;
     }
-    document.getElementById('submit-new').textContent = '⏳ Проверка доплаты...';
-    var state, checkError;
-    for (var attempt = 0; attempt < 3; attempt++) {
-      if (attempt) await new Promise(function(resolve) { setTimeout(resolve, 1500); });
-      try {
-        state = await fetchJsonGet({ mode: 'doplataSubmissionStatus', requestKey: pendingDoplataSubmission.requestKey }, 1);
-        if (state.submissionState === 'completed') {
-          pendingDoplataSubmission = null;
-          return { status: 'ok', orderId: state.orderId, warning: state.warning || '' };
-        }
-      } catch(readError) { checkError = readError; }
-    }
-    var message = 'Доплата по ID ' + payload.linkedOrderId + ': ';
-    message += state && state.written
-      ? 'таблица обновлена, но завершение уведомлений не подтверждено.'
-      : 'результат не подтверждён; документы или ДС могли уже создаться.';
-    message += '\nНе закрывайте окно и не меняйте форму. Повтор использует прежний ключ; на обновлённом сервере повторная генерация ДС заблокирована.';
-    message += '\nКлюч проверки: ' + pendingDoplataSubmission.requestKey;
-    if (err.httpStatus) message += '\nHTTP ' + err.httpStatus + (err.responseHost ? ', ' + err.responseHost : '');
-    if (checkError) message += '\nПроверка недоступна: ' + checkError.message;
-    if (err.serverResult && err.serverResult.requestId) message += '\nКод диагностики: ' + err.serverResult.requestId;
-    throw new Error(message);
+    scheduleDoplataVerification({requestKey:pendingDoplataSubmission.requestKey, orderId:String(payload.linkedOrderId),
+      userId:String(tgId), draft:activeDraft});
+    pendingDoplataSubmission = null;
+    return {status:'ok', orderId:String(payload.linkedOrderId), verificationPending:true};
   }
 }
 
@@ -1775,9 +1774,15 @@ document.getElementById('megaForm').addEventListener('submit', async function(e)
         ? await sendDoplataWithRecovery(payload) : await postJson(payload));
     invalidateOrdersCache();
 
-    await completeDraftSubmission();
+    if (!submissionResult.verificationPending) await completeDraftSubmission();
+    else {
+      draftDirty = false; draftEpoch++; clearTimeout(draftRecoveryTimer); updateDraftClosingGuard();
+      activeDraft = null;
+    }
     var isLinkedDoplata = currentRequestMode === 'project' && currentMain === 'status2' && linkedOrderId && linkedOrderId !== '__none__';
-    showAlert((isLinkedDoplata ? '✅ Доплата обработана!' : '✅ Заявка создана!') +
+    showAlert(submissionResult.verificationPending
+      ? '📨 Заявка отправлена. Доплата по ID ' + submissionResult.orderId + ' будет перепроверена отдельно. Повторно отправлять её не нужно.'
+      : (isLinkedDoplata ? '✅ Доплата обработана!' : '✅ Заявка создана!') +
       (submissionResult.orderId ? '\nID: ' + submissionResult.orderId : '') + '\n\nПодтверждение отправлено в Telegram.' +
       (submissionResult.warning ? '\n\n⚠️ ' + submissionResult.warning : ''));
     this.reset();
