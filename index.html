@@ -192,9 +192,9 @@
     .remove-maintenance-pair { border: none; background: #dc3545; color: #fff; border-radius: 5px; padding: 5px 9px; cursor: pointer; }
     .add-maintenance-pair { width: 100%; padding: 10px; margin: 0 0 14px; border: 1px dashed #2481cc; border-radius: 6px; background: #eef7ff; color: #1669a8; font-weight: bold; cursor: pointer; }
     .doc-meta-actions { display: flex; align-items: center; gap: 8px; margin-top: 7px; }
-    .doc-meta-refresh { padding: 6px 10px; border: 1px solid #2481cc; border-radius: 6px; background: #eef7ff; color: #1669a8; font-size: 12px; cursor: pointer; }
+    .doc-meta-refresh, .linked-orders-refresh { padding: 6px 10px; border: 1px solid #2481cc; border-radius: 6px; background: #eef7ff; color: #1669a8; font-size: 12px; cursor: pointer; }
     .doc-meta-refresh:disabled { color: #888; border-color: #bbb; background: #eee; cursor: wait; }
-    .doc-meta-status { color: #777; font-size: 11px; }
+    .doc-meta-status, .linked-orders-status { color: #777; font-size: 11px; }
 
     .gm-block { padding: 10px 14px; border-top: 1px solid #f0f0f0; }
     .gm-block input[type="text"] { margin-bottom: 8px; }
@@ -323,6 +323,10 @@
     <select class="doplata-order-select" id="doplata-order-select">
       <option value="">⏳ Загрузка заявок...</option>
     </select>
+    <div class="doc-meta-actions">
+      <button type="button" class="linked-orders-refresh" id="refresh-doplata-orders">🔄 Обновить</button>
+      <span class="linked-orders-status" id="doplata-orders-status" role="status">Заявки ещё не загружены</span>
+    </div>
     <div class="linked-order-info" id="linked-order-info">
       <div class="linked-title">📋 Информация о заявке</div>
       <div id="linked-order-details"></div>
@@ -633,6 +637,8 @@ const GET_TIMEOUT_MS = 35000;
 // Безопасный alert — стандартный браузерный showAlert() иногда "подвешивает"
 // ввод в Telegram Mini App после закрытия; showAlert от Telegram лишён этой проблемы
 function showAlert(msg) {
+  msg = msg == null ? '' : String(msg).trim();
+  if (!msg) { console.warn('Пустое уведомление пропущено'); return; }
   try {
     if (tg && typeof tg.showAlert === 'function') {
       tg.showAlert(msg);
@@ -759,13 +765,41 @@ let currentLinkedContractMeta = null;
 let ordersCacheReady  = false;
 let ordersLoadedAt    = 0;
 let ordersLoadPromise = null;
+let ordersLoadTgId = '';
+let ordersCacheEpoch = 0;
+let ordersLoadEpoch = 0;
+let doplataLoadVersion = 0;
 let ordersCacheTgId   = '';
 const ORDERS_CACHE_TTL_MS = 60000;
 
 function invalidateOrdersCache() {
   ordersCacheReady = false;
   ordersLoadedAt = 0;
-  ordersCacheTgId = '';
+  ordersCacheEpoch++;
+  if (ordersCacheTgId !== tgId) { cachedOrders = []; ordersCacheTgId = ''; }
+}
+
+function hasOrdersSnapshot() {
+  return /^\d+$/.test(tgId) && ordersCacheTgId === tgId && Array.isArray(cachedOrders);
+}
+
+async function ensureOrdersLoaded(forceReload) {
+  await waitForTelegramUser();
+  var userId = tgId, epoch = ordersCacheEpoch;
+  if (!forceReload && hasOrdersSnapshot() && ordersCacheReady && Date.now() - ordersLoadedAt < ORDERS_CACHE_TTL_MS) return cachedOrders;
+  if (ordersLoadPromise && ordersLoadTgId === userId && ordersLoadEpoch === epoch) return ordersLoadPromise;
+  var request = (async function() {
+    var result = await fetchJsonGet({mode:'getOrders', tg_id:userId, tg_username:tgUsername}, 2);
+    if (tgId !== userId || ordersCacheEpoch !== epoch) throw new Error('Данные изменились во время загрузки. Нажмите «Обновить».');
+    if (!result.curator) throw new Error('Сервер не распознал пользователя. Обратитесь к администратору бота.');
+    if (!Array.isArray(result.orders)) throw new Error('Сервер не вернул список заявок. Нажмите «Обновить».');
+    cachedOrders = result.orders; ordersAdmin = !!result.isAdmin;
+    ordersCacheReady = true; ordersLoadedAt = Date.now(); ordersCacheTgId = userId;
+    return cachedOrders;
+  })();
+  ordersLoadPromise = request; ordersLoadTgId = userId; ordersLoadEpoch = epoch;
+  try { return await request; }
+  finally { if (ordersLoadPromise === request) { ordersLoadPromise = null; ordersLoadTgId = ''; } }
 }
 
 // ===== ЭКРАНЫ =====
@@ -1123,46 +1157,74 @@ function selectWorkVariant(variant) {
 }
 
 // ===== ЗАГРУЗКА ЗАЯВОК ДЛЯ ДОПЛАТЫ =====
-async function loadDoplataOrders() {
+function eligibleLinkedOrders() {
+  return cachedOrders.filter(function(order) {
+    return order.sourceSheet === 'Лист1' && (!order.requestMode || order.requestMode === 'Проект') &&
+      ['предоплата','status1','доплата','status2'].indexOf(order.paymentType) >= 0;
+  });
+}
+
+function renderLinkedOrders() {
   var select = document.getElementById('doplata-order-select');
-  select.innerHTML = '<option value="">⏳ Загрузка...</option>';
+  var orders = eligibleLinkedOrders();
+  var signature = JSON.stringify([tgId, orders.map(function(order) { return [order.id,order.contractor,order.branch,order.date]; })]);
+  if (select._ordersSignature === signature && select.options.length) return orders.length;
+  var selected = select.value;
+  select.innerHTML = '';
+  var none = document.createElement('option'); none.value = '__none__'; none.textContent = '— Не связанная заявка —'; select.appendChild(none);
+  orders.forEach(function(order) {
+    var option = document.createElement('option'); option.value = String(order.id);
+    option.textContent = '№' + order.id + ' | ' + (order.contractor || '—') + ' | ' + (order.branch || '—') + ' | ' + (order.date || '');
+    select.appendChild(option);
+  });
+  select.value = orders.some(function(order) { return String(order.id) === selected; }) ? selected : '__none__';
+  select._ordersSignature = signature;
+  if (selected && selected !== '__none__' && selected !== 'none' && select.value !== selected) {
+    select.dispatchEvent(new Event('change', {bubbles:true}));
+  }
+  return orders.length;
+}
+
+async function loadDoplataOrders(forceReload) {
+  var version = ++doplataLoadVersion;
+  var select = document.getElementById('doplata-order-select');
+  var status = document.getElementById('doplata-orders-status');
+  var button = document.getElementById('refresh-doplata-orders');
+  button.setAttribute('aria-busy','true');
   try {
     await waitForTelegramUser();
-    var cacheFresh = ordersCacheReady && ordersCacheTgId === tgId &&
-      (Date.now() - ordersLoadedAt < ORDERS_CACHE_TTL_MS);
-    if (!cacheFresh) {
-      var payload = { mode: 'getOrders', tg_id: tgId, tg_username: tgUsername };
-      var result  = await fetchJsonGet(payload, 2);
-      if (!result.curator) throw new Error('Сервер не распознал пользователя. Обратитесь к администратору бота.');
-      cachedOrders = result.orders || [];
-      ordersAdmin = !!result.isAdmin;
-      ordersCacheReady = true;
-      ordersLoadedAt = Date.now();
-      ordersCacheTgId = tgId;
+    if (version !== doplataLoadVersion) return;
+    if (hasOrdersSnapshot()) {
+      var count = renderLinkedOrders();
+      status.textContent = 'Загружено заявок: ' + count + ' · Проверяем обновления…';
+    } else {
+      select.innerHTML = '';
+      var loading = document.createElement('option'); loading.value = ''; loading.textContent = '⏳ Загрузка заявок…'; select.appendChild(loading);
+      delete select._ordersSignature;
+      status.textContent = 'Загружаем связанные заявки…';
     }
-
-    // Показываем и предоплаты, и уже доплаченные заявки — к одному договору
-    // может быть несколько ДС подряд, после первого статус меняется на "доплата"
-    var predoplaty = cachedOrders.filter(function(o) {
-      return o.sourceSheet === 'Лист1' && (!o.requestMode || o.requestMode === 'Проект') && (
-        o.paymentType === 'предоплата' || o.paymentType === 'status1' ||
-        o.paymentType === 'доплата'    || o.paymentType === 'status2'
-      );
-    });
-
-    select.innerHTML = '<option value="__none__">— Не связанная заявка —</option>';
-
-    predoplaty.forEach(function(order) {
-      var opt = document.createElement('option');
-      opt.value = order.id;
-      opt.textContent = '№' + order.id + ' | ' + (order.contractor || '—') + ' | ' + (order.branch || '—') + ' | ' + (order.date || '');
-      select.appendChild(opt);
-    });
-
+    await ensureOrdersLoaded(!!forceReload);
+    if (version !== doplataLoadVersion) return;
+    var count = renderLinkedOrders();
+    status.textContent = count ? 'Загружено заявок: ' + count : 'Подходящих связанных заявок нет. Можно создать несвязанную заявку.';
   } catch(err) {
-    select.innerHTML = '<option value="none">— Не связанная заявка —</option>';
+    if (version !== doplataLoadVersion) return;
+    var message = err && err.message || 'Не удалось загрузить заявки';
+    if (hasOrdersSnapshot()) {
+      var count = renderLinkedOrders();
+      status.textContent = 'Не удалось обновить: ' + message + '. Сохранённый список доступен (' + count + ').';
+    } else {
+      select.innerHTML = '';
+      var failed = document.createElement('option'); failed.value = ''; failed.textContent = '⚠ Список не загружен — нажмите «Обновить»'; select.appendChild(failed);
+      delete select._ordersSignature;
+      status.textContent = 'Ошибка загрузки: ' + message;
+    }
+  } finally {
+    if (version === doplataLoadVersion) button.setAttribute('aria-busy','false');
   }
 }
+
+document.getElementById('refresh-doplata-orders').addEventListener('click', function() { loadDoplataOrders(true); });
 
 // ===== ВЫБОР СВЯЗАННОЙ ЗАЯВКИ =====
 document.getElementById('doplata-order-select').addEventListener('change', function() {
@@ -1825,61 +1887,31 @@ document.getElementById('megaForm').addEventListener('submit', async function(e)
 });
 
 // ===== ЗАГРУЗКА ЗАЯВОК =====
-function loadOrders(forceReload) {
+async function loadOrders(forceReload) {
   var list = document.getElementById('orders-list');
   document.getElementById('searchInput').value = '';
-
-  var cacheFresh = ordersCacheReady && /^\d+$/.test(tgId) && ordersCacheTgId === tgId &&
-    (Date.now() - ordersLoadedAt < ORDERS_CACHE_TTL_MS);
-  if (!forceReload && cacheFresh) {
+  if (hasOrdersSnapshot()) {
+    populateCuratorFilter('orders', cachedOrders, ordersAdmin); applyOrdersFilters();
+  } else list.innerHTML = '<div class="loading-msg">⏳ Загрузка заявок...</div>';
+  try {
+    await ensureOrdersLoaded(!!forceReload);
     populateCuratorFilter('orders', cachedOrders, ordersAdmin);
     applyOrdersFilters();
-    return Promise.resolve(cachedOrders);
+    return cachedOrders;
+  } catch(err) {
+    // Сбой обновления не затирает успешно загруженные данные этого пользователя.
+    if (hasOrdersSnapshot()) {
+      populateCuratorFilter('orders', cachedOrders, ordersAdmin); applyOrdersFilters();
+    } else list.innerHTML = '';
+    var errorBox = document.createElement('div'); errorBox.className = 'empty-msg';
+    errorBox.appendChild(document.createTextNode('❌ Ошибка загрузки заявок: ' + (err && err.message || 'Неизвестная ошибка')));
+    errorBox.appendChild(document.createElement('br'));
+    var retryBtn = document.createElement('button'); retryBtn.type = 'button'; retryBtn.className = 'btn';
+    retryBtn.style.marginTop = '12px'; retryBtn.textContent = '🔄 Повторить';
+    retryBtn.addEventListener('click', function() { loadOrders(true); }); errorBox.appendChild(retryBtn);
+    list.insertBefore(errorBox, list.firstChild);
+    return hasOrdersSnapshot() ? cachedOrders : [];
   }
-  if (ordersLoadPromise) return ordersLoadPromise;
-
-  list.innerHTML = '<div class="loading-msg">⏳ Загрузка заявок...</div>';
-  ordersLoadPromise = (async function() {
-    try {
-      var result = await fetchJsonGet({ mode: 'getOrders', tg_id: tgId, tg_username: tgUsername }, 2);
-      if (!result.curator) throw new Error('Сервер не распознал пользователя. Обратитесь к администратору бота.');
-      cachedOrders = result.orders || [];
-      ordersAdmin = !!result.isAdmin;
-      populateCuratorFilter('orders', cachedOrders, ordersAdmin);
-      ordersCacheReady = true;
-      ordersLoadedAt = Date.now();
-      ordersCacheTgId = tgId;
-      if (!cachedOrders || cachedOrders.length === 0) {
-        list.innerHTML = '<div class="empty-msg">📭 Заявок пока нет<br><small>curator: ' + (result.curator || 'пусто') + '</small></div>';
-        return cachedOrders;
-      }
-      applyOrdersFilters();
-      return cachedOrders;
-    } catch(err) {
-      list.innerHTML = '';
-      var errorBox = document.createElement('div');
-      errorBox.className = 'empty-msg';
-      errorBox.appendChild(document.createTextNode('❌ Ошибка загрузки заявок:'));
-      errorBox.appendChild(document.createElement('br'));
-      var details = document.createElement('small');
-      details.style.wordBreak = 'break-word';
-      details.textContent = err.message;
-      errorBox.appendChild(details);
-      errorBox.appendChild(document.createElement('br'));
-      var retryBtn = document.createElement('button');
-      retryBtn.type = 'button';
-      retryBtn.className = 'btn';
-      retryBtn.style.marginTop = '12px';
-      retryBtn.textContent = '🔄 Повторить';
-      retryBtn.addEventListener('click', function() { loadOrders(true); });
-      errorBox.appendChild(retryBtn);
-      list.appendChild(errorBox);
-      return [];
-    } finally {
-      ordersLoadPromise = null;
-    }
-  })();
-  return ordersLoadPromise;
 }
 
 // ===== РЕНДЕР КАРТОЧЕК =====
@@ -2759,6 +2791,7 @@ document.getElementById('screen-new').addEventListener('change', function(event)
 });
 document.getElementById('screen-new').addEventListener('click', function(event) {
   var button = event.target.closest('button');
+  if (button && button.id === 'refresh-doplata-orders') return;
   if (button && button.classList.contains('doc-meta-refresh')) return;
   if (button && !['back-from-new','save-draft','submit-new','refresh-doc-meta','cg-download','cg-save-pdf'].includes(button.id)) markDraftDirty();
 });
