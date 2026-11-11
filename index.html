@@ -44,7 +44,10 @@
     .form-group { margin-bottom: 14px; }
     label { display: block; margin-bottom: 5px; font-weight: bold; font-size: 13px; }
     input[type="text"], select { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
-    input[type="file"] { margin-top: 4px; font-size: 13px; width: 100%; }
+    .file-picker { display: inline-flex; position: relative; overflow: hidden; margin: 4px 0; padding: 10px 14px; border: 1px solid #217ac0; border-radius: 8px; color: #1665a6; background: #eef5ff; cursor: pointer; }
+    .file-picker input[type="file"] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+    .file-picker:focus-within { outline: 2px solid #217ac0; outline-offset: 2px; }
+    .file-picker:has(input:disabled) { opacity: .55; cursor: default; }
 
     .submit-btn { width: 100%; padding: 14px; background: #28a745; color: #fff; border: none; border-radius: 6px; font-size: 15px; font-weight: bold; cursor: pointer; margin-top: 10px; }
     .submit-btn:disabled { background: #aaa; cursor: not-allowed; }
@@ -421,12 +424,12 @@
   <div id="contract-block">
     <div class="section-title">Договор</div>
     <div class="type-buttons">
-      <button type="button" class="btn active" id="contract-mode-upload">📎 Загрузить файл</button>
+      <button type="button" class="btn active" id="contract-mode-upload">📎 Готовый договор</button>
       <button type="button" class="btn" id="contract-mode-generate">📝 Сформировать в боте</button>
     </div>
 
     <div id="contract-upload-part">
-      <div style="font-size:12px;color:#777;">Файл договора добавьте в общую загрузку документов ниже.</div>
+      <label class="file-picker"><span>📎 Выбрать файл договора</span><input type="file" id="contract-file" aria-label="Выбрать файл договора"></label>
     </div>
 
     <div id="contract-generate-part" style="display:none;">
@@ -522,8 +525,8 @@
         </div>
       </div>
       <div class="form-group" id="common-documents">
-        <label>📎 Документы (можно выбрать сразу несколько файлов)</label>
-        <input type="file" id="mass-files" multiple>
+        <label>Документы заявки</label>
+        <label class="file-picker"><span>📎 Выбрать документы</span><input type="file" id="mass-files" aria-label="Выбрать документы заявки" multiple></label>
       </div>
       <button type="submit" class="submit-btn" id="submit-new">📤 Отправить заявку</button>
     </div>
@@ -539,7 +542,7 @@
     <div class="form-box active">
       <div class="form-group">
         <label>📎 Файлы (можно выбрать сразу несколько)</label>
-        <input type="file" id="fi-files" multiple>
+        <label class="file-picker"><span>📎 Выбрать документы</span><input type="file" id="fi-files" aria-label="Выбрать документы" multiple></label>
       </div>
       <button type="submit" class="submit-btn" id="fix-submit-btn">📤 Загрузить исправленные</button>
     </div>
@@ -700,31 +703,56 @@ async function fetchJsonGet(payload, attempts) {
 
 async function postJson(payload) {
   await ensureTelegramIdentity(payload);
-  var resp = await fetch(SCRIPT_URL + '?_ts=' + Date.now(), {
-    method: 'POST',
-    cache: 'no-store',
-    body: JSON.stringify(payload)
-  });
-  var text = await resp.text();
+  var files = payload.massFiles || [];
+  if (payload.purchaseItems) files = payload.purchaseItems.flatMap(function(item) { return item.files || []; });
+  var sendingStage = files.length ? 'Передача на сервер: ' + files.slice(0, 2).map(function(file) {
+    return '«' + file.name.slice(0, 45) + '»';
+  }).join(', ') + (files.length > 2 ? ' и ещё ' + (files.length - 2) : '') + '. ' : '';
+  var resp, text;
+  try {
+    resp = await fetch(SCRIPT_URL + '?_ts=' + Date.now(), {
+      method: 'POST',
+      cache: 'no-store',
+      body: JSON.stringify(payload)
+    });
+    text = await resp.text();
+  } catch(err) {
+    if (!sendingStage) throw err;
+    var networkError = new Error(sendingStage + 'Ответ не получен.');
+    networkError.attachmentTransport = true;
+    throw networkError;
+  }
 
   if (!resp.ok) {
-    var transportError = new Error('Сервер не подтвердил ответ (HTTP ' + resp.status + ').');
+    var transportError = new Error(sendingStage + 'Сервер не подтвердил ответ (HTTP ' + resp.status + ').');
+    transportError.attachmentTransport = !!sendingStage;
     transportError.httpStatus = resp.status;
     try { transportError.responseHost = new URL(resp.url).host; } catch(e) {}
     throw transportError;
   }
-  if (!text || !text.trim()) throw new Error('Сервер вернул пустой ответ');
+  if (!text || !text.trim()) {
+    var emptyError = new Error(sendingStage + 'Сервер вернул пустой ответ.');
+    emptyError.attachmentTransport = !!sendingStage;
+    throw emptyError;
+  }
 
   var result;
   try {
     result = JSON.parse(text);
   } catch(parseErr) {
-    throw new Error('Сервер вернул не JSON: ' + text.substring(0, 160));
+    var formatError = new Error(sendingStage + 'Сервер вернул ответ в неожиданном формате.');
+    formatError.attachmentTransport = !!sendingStage;
+    throw formatError;
   }
   if (!result || result.status !== 'ok') {
     var serverError = new Error(((result && result.message) || 'Операция не подтверждена сервером') + (result && result.requestId ? '\nКод диагностики: ' + result.requestId : ''));
     serverError.serverResult = result;
     throw serverError;
+  }
+  if (payload.uploadProtocol && (payload.massFiles || []).length && !result.attachmentsConfirmed) {
+    var confirmationError = new Error('Сервер не подтвердил сохранение документов. Проверьте папку заявки перед повторной отправкой.');
+    confirmationError.attachmentConfirmationMissing = true;
+    throw confirmationError;
   }
   return result;
 }
@@ -733,7 +761,7 @@ async function sendPurchasesWithRecovery(payload) {
   try { return await postJson(payload); }
   catch(sendError) {
     // Явная ошибка валидации не требует проверки журнала.
-    if (sendError.serverResult && !sendError.serverResult.batchStarted) throw sendError;
+    if (sendError.serverResult && (sendError.serverResult.attachmentFailure || !sendError.serverResult.batchStarted)) throw sendError;
     document.getElementById('submit-new').textContent = '⏳ Проверка созданных закупов...';
     var lastState = null;
     var readError = null;
@@ -749,7 +777,7 @@ async function sendPurchasesWithRecovery(payload) {
       ? 'Записаны закупы: ' + lastState.orderIds.join(', ') + '. Завершение всех уведомлений пока не подтверждено.'
       : 'Не удалось подтвердить завершение отправки. Это не означает, что закупы не созданы.';
     if (readError) message += '\nПроверка состояния недоступна: ' + readError.message;
-    else if (sendError.serverResult) message += '\n' + sendError.message;
+    if (sendError.serverResult || sendError.attachmentTransport) message += '\n' + sendError.message;
     var pendingError = new Error(message + '\nНе закрывайте окно: повтор использует тот же пакет.');
     pendingError.serverResult = { batchStarted: true };
     throw pendingError;
@@ -864,6 +892,19 @@ document.getElementById('add-purchase-item').addEventListener('click', function(
 
 var purchaseBatchKey = '';
 var pendingPurchasePayload = null;
+function openAttachmentPicker(input) {
+  if (!input || input.disabled) return;
+  try {
+    if (typeof input.showPicker === 'function') {
+      input.showPicker();
+      return;
+    }
+  } catch(err) {
+    // Встроенный браузер может разрешать только обычный клик по input.
+  }
+  input.click();
+}
+
 var pendingWorkSubmission = null;
 async function sendWorkWithRecovery(payload) {
   var signature = JSON.stringify(payload);
@@ -871,15 +912,17 @@ async function sendWorkWithRecovery(payload) {
     throw new Error('Сначала проверьте прежнюю отправку. Верните прежние параметры; новая заявка не отправлена.');
   }
   if (!pendingWorkSubmission) pendingWorkSubmission = {
-    signature: signature, requestKey: 'work_' + Date.now() + '_' + Math.random().toString(36).slice(2)
+    signature: signature, uploadProtocol: 1, requestKey: 'work_' + Date.now() + '_' + Math.random().toString(36).slice(2)
   };
   payload.requestKey = pendingWorkSubmission.requestKey;
+  if (pendingWorkSubmission.uploadProtocol) payload.uploadProtocol = pendingWorkSubmission.uploadProtocol;
   await checkpointDraftSubmission();
   try {
     var result = await postJson(payload);
     pendingWorkSubmission = null;
     return result;
   } catch(err) {
+    if (err.attachmentConfirmationMissing || (err.serverResult && err.serverResult.attachmentFailure)) throw err;
     if (err.serverResult && !err.serverResult.submissionStarted) {
       pendingWorkSubmission = null;
       throw err;
@@ -890,7 +933,7 @@ async function sendWorkWithRecovery(payload) {
       if (attempt) await new Promise(function(resolve) { setTimeout(resolve, 1500); });
       try {
         state = await fetchJsonGet({ mode: 'workSubmissionStatus', requestKey: pendingWorkSubmission.requestKey }, 1);
-        if (state.submissionState === 'completed') {
+        if (state.submissionState === 'completed' && (!payload.uploadProtocol || !(payload.massFiles || []).length || state.attachmentsConfirmed)) {
           pendingWorkSubmission = null;
           return { status: 'ok', orderId: state.orderId };
         }
@@ -900,9 +943,10 @@ async function sendWorkWithRecovery(payload) {
     message += state && state.submissionState === 'written'
       ? 'Заявка записана; завершение уведомлений пока не подтверждено.'
       : 'Не удалось подтвердить завершение. Это не означает, что заявка не создана.';
-    message += '\nНе закрывайте окно и не меняйте форму. Повтор использует прежний ключ и не создаёт вторую заявку на обновлённом сервере.';
+    message += '\nПовтор использует прежний ключ. Сохраните исходный набор документов.';
     message += '\nКлюч проверки: ' + pendingWorkSubmission.requestKey;
-    if (err.httpStatus) message += '\nHTTP ' + err.httpStatus + (err.responseHost ? ', ' + err.responseHost : '');
+    if (err.attachmentTransport) message += '\n' + err.message;
+    else if (err.httpStatus) message += '\nHTTP ' + err.httpStatus + (err.responseHost ? ', ' + err.responseHost : '');
     if (checkError) message += '\nПроверка недоступна: ' + checkError.message;
     if (err.serverResult && err.serverResult.requestId) message += '\nКод диагностики: ' + err.serverResult.requestId;
     throw new Error(message);
@@ -930,20 +974,33 @@ async function sendDoplataWithRecovery(payload) {
     throw new Error('Незавершённая доплата: верните прежние параметры и проверьте результат. Новая отправка не выполнена.');
   }
   if (!pendingDoplataSubmission) pendingDoplataSubmission = {
-    signature: signature, requestKey: 'doplata_' + Date.now() + '_' + Math.random().toString(36).slice(2)
+    signature: signature, uploadProtocol: 1, requestKey: 'doplata_' + Date.now() + '_' + Math.random().toString(36).slice(2)
   };
   payload.requestKey = pendingDoplataSubmission.requestKey;
+  if (pendingDoplataSubmission.uploadProtocol) payload.uploadProtocol = pendingDoplataSubmission.uploadProtocol;
   await checkpointDraftSubmission();
   try {
     var result = await postJson(payload);
     pendingDoplataSubmission = null;
     return result;
   } catch(err) {
+    if (err.attachmentConfirmationMissing || (err.serverResult && err.serverResult.attachmentFailure)) throw err;
     // Ошибки до начала обработки остаются ошибками, неподтверждённый ответ — нет.
     if (err.serverResult && (err.serverResult.submissionStarted === false ||
         (!err.serverResult.submissionStarted && !err.serverResult.requestId))) {
       pendingDoplataSubmission = null;
       throw err;
+    }
+    if (payload.uploadProtocol && (payload.massFiles || []).length) {
+      var state;
+      try { state = await fetchJsonGet({mode:'doplataSubmissionStatus', requestKey:payload.requestKey}, 1); } catch(readError) {}
+      if (!state || !state.attachmentsConfirmed) {
+        throw new Error((err.attachmentTransport ? err.message + '\n' : '') + 'Сохранение файлов на Google Drive не подтверждено. Нажмите «Повторить загрузку» с теми же файлами.');
+      }
+      if (state.submissionState === 'completed') {
+        pendingDoplataSubmission = null;
+        return {status:'ok', orderId:state.orderId, warning:state.warning};
+      }
     }
     scheduleDoplataVerification({requestKey:pendingDoplataSubmission.requestKey, orderId:String(payload.linkedOrderId),
       userId:String(tgId), draft:activeDraft});
@@ -962,7 +1019,7 @@ function addPurchaseItem() {
     '<div class="form-group"><label>Сумма *</label><input type="text" class="purchase-amount" inputmode="decimal" placeholder="100 000"></div>' +
     '<div class="form-group"><label>Филиал *</label><input type="text" class="purchase-branch" placeholder="Название филиала"></div>' +
     '<div class="form-group"><label>Ссылка на заявку *</label><input type="text" class="purchase-url" placeholder="https://ecosystem.dns-shop.ru/crm/type/145/details/4849/"></div>' +
-    '<div class="form-group"><label>Документы (включая файл договора)</label><input type="file" class="purchase-files" multiple></div>' +
+    '<div class="form-group"><label>Документы (включая файл договора)</label><label class="file-picker"><span>📎 Выбрать документы</span><input type="file" class="purchase-files" aria-label="Выбрать документы закупа" multiple></label></div>' +
     '<div class="form-group"><label>Ожидаемая дата поставки *</label><input type="date" class="purchase-date"></div>';
   item.querySelector('.remove-maintenance-pair').addEventListener('click', function() {
     if (purchaseBatchKey) { showAlert('Сначала завершите текущую отправку закупов.'); return; }
@@ -1002,8 +1059,10 @@ function readPurchaseFile(file) {
   return new Promise(function(resolve, reject) {
     var reader = new FileReader();
     reader.onload = function() { resolve(reader.result); };
-    reader.onerror = function() { reject(new Error('Не удалось прочитать ' + file.name)); };
-    reader.readAsDataURL(file);
+    var fail = function() { reject(new Error('«' + file.name + '» — этап «чтение файла на устройстве». Выберите файл снова.')); };
+    reader.onerror = reader.onabort = fail;
+    if (file.size === 0) { fail(); return; }
+    try { reader.readAsDataURL(file); } catch(err) { fail(); }
   });
 }
 
@@ -1573,36 +1632,19 @@ attachMoneyFormatting('cg-price');
 attachMoneyFormatting('dg-price');
 
 // ===== ФАЙЛ → BASE64 =====
-function readFile(inputId) {
-  return new Promise(function(resolve) {
-    var input = document.getElementById(inputId);
-    var files = draftFileList(input);
-    if (!files[0]) return resolve({ data: null, name: '' });
-    var reader = new FileReader();
-    reader.onload  = function(e) { resolve({ data: e.target.result, name: files[0].name }); };
-    reader.onerror = function()  { resolve({ data: null, name: '' }); };
-    reader.readAsDataURL(files[0]);
-  });
-}
-
-// ===== МАССОВОЕ ЧТЕНИЕ НЕСКОЛЬКИХ ФАЙЛОВ =====
-function readMassFiles(inputId) {
-  return new Promise(function(resolve) {
-    var input = document.getElementById(inputId);
-    var files = draftFileList(input);
-    if (!files.length) return resolve([]);
-    var promises = files.map(function(file) {
-      return new Promise(function(res) {
-        var reader = new FileReader();
-        reader.onload  = function(e) { res({ data: e.target.result, name: file.name }); };
-        reader.onerror = function()  { res(null); };
-        reader.readAsDataURL(file);
-      });
-    });
-    Promise.all(promises).then(function(results) {
-      resolve(results.filter(function(r) { return r !== null; }));
-    });
-  });
+async function readMassFiles(inputId) {
+  var input = document.getElementById(inputId);
+  var result = [];
+  for (var file of draftFileList(input)) {
+    if (!draftFileCache.has(file)) draftFileCache.set(file, readPurchaseFile(file));
+    try {
+      result.push({name:file.name, data:await draftFileCache.get(file)});
+    } catch(err) {
+      draftFileCache.delete(file);
+      throw err;
+    }
+  }
+  return result;
 }
 
 // ===== БЕЙДЖ СТАТУСА =====
@@ -1653,6 +1695,7 @@ function makeRow(label, value) {
 document.getElementById('megaForm').addEventListener('submit', async function(e) {
   e.preventDefault();
   if (draftReadOnly || draftBusy) { showAlert('Черновик доступен только для просмотра или сохраняется.'); return; }
+  if (document.getElementById('submit-new').disabled) return;
 
   if (!currentMain) { showAlert('Выберите тип оплаты!'); return; }
   if (currentRequestMode === 'maintenance_purchase') {
@@ -1689,7 +1732,7 @@ document.getElementById('megaForm').addEventListener('submit', async function(e)
       showAlert('❌ ' + err.message + (purchaseBatchKey ? '\nПовторите отправку тех же блоков.' : ''));
     } finally {
       purchaseButton.disabled = false;
-      purchaseButton.textContent = '📤 Отправить заявку';
+      purchaseButton.textContent = purchaseBatchKey ? '↻ Повторить загрузку' : '📤 Отправить заявку';
     }
     return;
   }
@@ -1778,9 +1821,13 @@ document.getElementById('megaForm').addEventListener('submit', async function(e)
   var btn = document.getElementById('submit-new');
   btn.disabled    = true;
   btn.textContent = '⏳ Отправка...';
+  var retry = false;
 
   try {
     var massFiles = await readMassFiles('mass-files');
+    if (!contractGenerateMode && (currentMain === 'status1' || currentMain === 'status3')) {
+      massFiles = (await readMassFiles('contract-file')).concat(massFiles);
+    }
     var m15 = currentRequestMode === 'maintenance_purchase'
       ? ''
       : (document.getElementById('i-m15') ? document.getElementById('i-m15').value : '');
@@ -1838,10 +1885,10 @@ document.getElementById('megaForm').addEventListener('submit', async function(e)
       payload.ksGenerate         = document.getElementById('dg-ks-checkbox').checked;
     }
 
-    var submissionResult = currentRequestMode === 'maintenance_work'
-      ? await sendWorkWithRecovery(payload)
-      : (currentRequestMode === 'project' && currentMain === 'status2' && linkedOrderId && linkedOrderId !== '__none__'
-        ? await sendDoplataWithRecovery(payload) : await postJson(payload));
+    var isLinkedDoplata = currentRequestMode === 'project' && currentMain === 'status2' && linkedOrderId && linkedOrderId !== '__none__';
+    var submissionResult = isLinkedDoplata ? await sendDoplataWithRecovery(payload)
+      : (currentRequestMode === 'maintenance_work' || massFiles.length || pendingWorkSubmission
+        ? await sendWorkWithRecovery(payload) : await postJson(payload));
     invalidateOrdersCache();
 
     if (!submissionResult.verificationPending) await completeDraftSubmission();
@@ -1849,13 +1896,17 @@ document.getElementById('megaForm').addEventListener('submit', async function(e)
       draftDirty = false; draftEpoch++; clearTimeout(draftRecoveryTimer); updateDraftClosingGuard();
       activeDraft = null;
     }
-    var isLinkedDoplata = currentRequestMode === 'project' && currentMain === 'status2' && linkedOrderId && linkedOrderId !== '__none__';
     showAlert(submissionResult.verificationPending
       ? '📨 Заявка отправлена. Доплата по ID ' + submissionResult.orderId + ' будет перепроверена отдельно. Повторно отправлять её не нужно.'
       : (isLinkedDoplata ? '✅ Доплата обработана!' : '✅ Заявка создана!') +
       (submissionResult.orderId ? '\nID: ' + submissionResult.orderId : '') + '\n\nПодтверждение отправлено в Telegram.' +
       (submissionResult.warning ? '\n\n⚠️ ' + submissionResult.warning : ''));
     this.reset();
+    ['mass-files', 'contract-file'].forEach(function(id) {
+      var input = document.getElementById(id);
+      delete input._draftFiles;
+      showDraftFiles(input);
+    });
     document.getElementById('form-fields').classList.remove('active');
     document.getElementById('doplata-block').style.display      = 'none';
     document.getElementById('linked-order-info').style.display  = 'none';
@@ -1879,10 +1930,11 @@ document.getElementById('megaForm').addEventListener('submit', async function(e)
     showScreen('screen-menu');
 
   } catch(err) {
+    retry = !!(pendingWorkSubmission || pendingDoplataSubmission) && !err.attachmentConfirmationMissing;
     showAlert('❌ Ошибка отправки: ' + err.message);
   } finally {
-    btn.disabled    = false;
-    btn.textContent = '📤 Отправить заявку';
+    btn.disabled = false;
+    btn.textContent = retry ? '↻ Повторить загрузку' : '📤 Отправить заявку';
   }
 });
 
@@ -1989,13 +2041,13 @@ function renderOrders(orders) {
           ? '<a class="link-btn gray" href="' + order.linkedFolderUrl + '" target="_blank">📂 Предоплата</a>'
           : '') +
         (order.fixFolderUrl
-          ? '<a class="link-btn green" href="' + order.fixFolderUrl + '" target="_blank">✅ Исправленные</a>'
+          ? '<a class="link-btn green" href="' + order.fixFolderUrl + '" target="_blank">📁 Открыть исправленные</a>'
           : '') +
         '<button class="link-btn orange fix-btn"' +
           ' data-id="'      + order.id                  + '"' +
           ' data-payment="' + (order.paymentType || '') + '"' +
           ' data-m15="'     + (order.m15 || '')         + '">' +
-          (order.fixFolderUrl ? '🔄 Загрузить снова' : '⚠️ Исправленные') +
+          '📎 Загрузить исправленные' +
         '</button>' +
         '<button class="link-btn gray add-docs-btn" data-id="' + order.id + '">📎 Доп. документы</button>' +
         (order.supportsGm ?
@@ -2034,12 +2086,14 @@ function renderOrders(orders) {
   list.querySelectorAll('.fix-btn').forEach(function(b) {
     b.addEventListener('click', function() {
       openFixScreen(this.getAttribute('data-id'));
+      openAttachmentPicker(document.getElementById('fi-files'));
     });
   });
 
   list.querySelectorAll('.add-docs-btn').forEach(function(b) {
     b.addEventListener('click', function() {
       openAddDocsScreen(this.getAttribute('data-id'));
+      openAttachmentPicker(document.getElementById('fi-files'));
     });
   });
 
@@ -2078,8 +2132,20 @@ document.getElementById('searchInput').addEventListener('input', applyOrdersFilt
 
 // ===== ЭКРАН ИСПРАВЛЕННЫХ =====
 var currentFixMode = 'fix'; // 'fix' или 'additional'
+var pendingFixUpload = null;
+
+function resetFixUpload() {
+  var input = document.getElementById('fi-files');
+  input.value = '';
+  delete input._draftFiles;
+  showDraftFiles(input);
+  pendingFixUpload = null;
+}
+
+document.getElementById('fi-files').addEventListener('change', function() { showDraftFiles(this); });
 
 function openFixScreen(orderId) {
+  if (currentFixOrderId !== orderId || currentFixMode !== 'fix') resetFixUpload();
   currentFixOrderId = orderId;
   currentFixMode = 'fix';
   document.getElementById('fix-order-id-text').textContent = orderId;
@@ -2089,6 +2155,7 @@ function openFixScreen(orderId) {
 }
 
 function openAddDocsScreen(orderId) {
+  if (currentFixOrderId !== orderId || currentFixMode !== 'additional') resetFixUpload();
   currentFixOrderId = orderId;
   currentFixMode = 'additional';
   document.getElementById('fix-order-id-text').textContent = orderId;
@@ -2103,11 +2170,17 @@ document.getElementById('fixForm').addEventListener('submit', async function(e) 
 
   var isAdditional = currentFixMode === 'additional';
   var btn = document.getElementById('fix-submit-btn');
+  if (btn.disabled) return;
+  var input = document.getElementById('fi-files');
+  var back = document.getElementById('back-from-fix');
+  input.disabled = back.disabled = true;
+  var retry = false;
   btn.disabled    = true;
   btn.textContent = '⏳ Загрузка...';
 
   try {
     var massFiles = await readMassFiles('fi-files');
+    if (!massFiles.length) { showAlert('Выберите хотя бы один документ.'); return; }
 
     var payload = {
       mode: isAdditional ? 'addDocs' : 'fix',
@@ -2117,21 +2190,29 @@ document.getElementById('fixForm').addEventListener('submit', async function(e) 
       massFiles: massFiles
     };
 
+    var signature = JSON.stringify(payload);
+    if (!pendingFixUpload || pendingFixUpload.signature !== signature) {
+      pendingFixUpload = {signature:signature, key:'docs_' + Date.now() + '_' + Math.random().toString(36).slice(2)};
+    }
+    payload.requestKey = pendingFixUpload.key;
+    payload.uploadProtocol = 1;
     await postJson(payload);
     invalidateOrdersCache();
 
     showAlert(isAdditional
       ? '✅ Дополнительные документы загружены!\n\nПроверьте Telegram.'
       : '✅ Исправленные документы загружены!\n\nПроверьте Telegram.');
-    this.reset();
+    resetFixUpload();
     showScreen('screen-orders');
     loadOrders(true);
 
   } catch(err) {
+    retry = !!pendingFixUpload && !err.attachmentConfirmationMissing;
     showAlert('❌ Ошибка: ' + err.message);
   } finally {
-    btn.disabled    = false;
-    btn.textContent = isAdditional ? '📤 Загрузить дополнительные' : '📤 Загрузить исправленные';
+    input.disabled = back.disabled = false;
+    btn.disabled = false;
+    btn.textContent = retry ? '↻ Повторить загрузку' : isAdditional ? '📤 Загрузить дополнительные' : '📤 Загрузить исправленные';
   }
 });
 
@@ -2430,10 +2511,13 @@ async function captureDraftControls(container, idsOnly) {
     if (control.type === 'file') {
       field.files = [];
       for (var file of draftFileList(control)) {
-        if (!draftFileCache.has(file)) {
-          draftFileCache.set(file, readPurchaseFile(file).then(function(data) { return data; }));
+        if (!draftFileCache.has(file)) draftFileCache.set(file, readPurchaseFile(file));
+        try {
+          field.files.push({name:file.name, type:file.type, lastModified:file.lastModified, data:await draftFileCache.get(file)});
+        } catch(err) {
+          draftFileCache.delete(file);
+          throw err;
         }
-        field.files.push({name:file.name, type:file.type, lastModified:file.lastModified, data:await draftFileCache.get(file)});
       }
     }
     result.push(field);
@@ -2469,7 +2553,12 @@ function showDraftFiles(input) {
   hint.appendChild(document.createTextNode('📎 ' + files.map(function(f) { return f.name; }).join(', ')));
   var clear = document.createElement('button');
   clear.type = 'button'; clear.className = 'back-btn'; clear.textContent = 'Убрать вложения';
-  clear.addEventListener('click', function() { input.value = ''; input._draftFiles = []; hint.remove(); markDraftDirty(); });
+  clear.disabled = input.disabled;
+  clear.addEventListener('click', function() {
+    if (input.disabled) return;
+    input.value = ''; delete input._draftFiles; hint.remove();
+    if (document.getElementById('screen-new').contains(input)) markDraftDirty();
+  });
   hint.appendChild(clear); input.insertAdjacentElement('afterend', hint); input._draftFileHint = hint;
 }
 
