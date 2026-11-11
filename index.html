@@ -46,6 +46,9 @@
     input[type="text"], select { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
     .file-picker { display: inline-flex; position: relative; overflow: hidden; margin: 4px 0; padding: 10px 14px; border: 1px solid #217ac0; border-radius: 8px; color: #1665a6; background: #eef5ff; cursor: pointer; }
     .file-picker input[type="file"] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+    .file-picker.drop-target { display: inline-grid; gap: 4px; }
+    .file-picker .drop-hint { font-weight: normal; }
+    .file-picker.is-dragging { background: #d5eaff; outline: 2px solid #217ac0; outline-offset: 2px; }
     .file-picker:focus-within { outline: 2px solid #217ac0; outline-offset: 2px; }
     .file-picker:has(input:disabled) { opacity: .55; cursor: default; }
 
@@ -429,7 +432,7 @@
     </div>
 
     <div id="contract-upload-part">
-      <label class="file-picker"><span>📎 Выбрать файл договора</span><input type="file" id="contract-file" aria-label="Выбрать файл договора"></label>
+      <label class="file-picker drop-target"><span>📎 Выбрать файл договора</span><small class="drop-hint">Или перетащите сюда файл договора</small><input type="file" id="contract-file" aria-label="Выбрать файл договора"></label>
     </div>
 
     <div id="contract-generate-part" style="display:none;">
@@ -526,7 +529,7 @@
       </div>
       <div class="form-group" id="common-documents">
         <label>Документы заявки</label>
-        <label class="file-picker"><span>📎 Выбрать документы</span><input type="file" id="mass-files" aria-label="Выбрать документы заявки" multiple></label>
+        <label class="file-picker drop-target"><span>📎 Выбрать документы</span><small class="drop-hint">Или перетащите сюда файлы</small><input type="file" id="mass-files" aria-label="Выбрать документы заявки" multiple></label>
       </div>
       <button type="submit" class="submit-btn" id="submit-new">📤 Отправить заявку</button>
     </div>
@@ -542,7 +545,7 @@
     <div class="form-box active">
       <div class="form-group">
         <label>📎 Файлы (можно выбрать сразу несколько)</label>
-        <label class="file-picker"><span>📎 Выбрать документы</span><input type="file" id="fi-files" aria-label="Выбрать документы" multiple></label>
+        <label class="file-picker drop-target"><span>📎 Выбрать документы</span><small class="drop-hint">Или перетащите сюда файлы</small><input type="file" id="fi-files" aria-label="Выбрать документы" multiple></label>
       </div>
       <button type="submit" class="submit-btn" id="fix-submit-btn">📤 Загрузить исправленные</button>
     </div>
@@ -1904,6 +1907,7 @@ document.getElementById('megaForm').addEventListener('submit', async function(e)
     this.reset();
     ['mass-files', 'contract-file'].forEach(function(id) {
       var input = document.getElementById(id);
+      input.value = '';
       delete input._draftFiles;
       showDraftFiles(input);
     });
@@ -2142,7 +2146,10 @@ function resetFixUpload() {
   pendingFixUpload = null;
 }
 
-document.getElementById('fi-files').addEventListener('change', function() { showDraftFiles(this); });
+document.getElementById('fi-files').addEventListener('change', function() {
+  delete this._draftFiles;
+  showDraftFiles(this);
+});
 
 function openFixScreen(orderId) {
   if (currentFixOrderId !== orderId || currentFixMode !== 'fix') resetFixUpload();
@@ -2559,7 +2566,9 @@ function showDraftFiles(input) {
     input.value = ''; delete input._draftFiles; hint.remove();
     if (document.getElementById('screen-new').contains(input)) markDraftDirty();
   });
-  hint.appendChild(clear); input.insertAdjacentElement('afterend', hint); input._draftFileHint = hint;
+  hint.appendChild(clear);
+  (input.closest('.file-picker') || input).insertAdjacentElement('afterend', hint);
+  input._draftFileHint = hint;
 }
 
 function restoreDraftControls(container, fields, idsOnly) {
@@ -2873,6 +2882,34 @@ document.getElementById('back-from-drafts').addEventListener('click', function()
 document.getElementById('save-draft').addEventListener('click', saveCurrentDraft);
 document.getElementById('orders-curator').addEventListener('change', applyOrdersFilters);
 document.getElementById('drafts-curator').addEventListener('change', renderDrafts);
+document.querySelectorAll('.file-picker.drop-target').forEach(function(target) {
+  var input = target.querySelector('input[type="file"]');
+  target.addEventListener('dragover', function(event) {
+    if (!event.dataTransfer || !Array.from(event.dataTransfer.types).includes('Files')) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = input.disabled ? 'none' : 'copy';
+    target.classList.toggle('is-dragging', !input.disabled);
+  });
+  target.addEventListener('dragleave', function(event) {
+    if (!target.contains(event.relatedTarget)) target.classList.remove('is-dragging');
+  });
+  target.addEventListener('drop', function(event) {
+    event.preventDefault();
+    target.classList.remove('is-dragging');
+    if (input.disabled || !event.dataTransfer) return;
+    var files = Array.from(event.dataTransfer.files);
+    if (!files.length) return;
+    var hasFolder = Array.from(event.dataTransfer.items || []).some(function(item) {
+      return item.webkitGetAsEntry && item.webkitGetAsEntry()?.isDirectory;
+    });
+    if (hasFolder) { showAlert('Перетащите отдельные файлы из папки.'); return; }
+    if (!input.multiple && files.length > 1) { showAlert('Перетащите один файл договора.'); return; }
+    input.value = '';
+    input._draftFiles = files;
+    showDraftFiles(input);
+    if (document.getElementById('screen-new').contains(input)) markDraftDirty();
+  });
+});
 document.getElementById('screen-new').addEventListener('input', markDraftDirty);
 document.getElementById('screen-new').addEventListener('change', function(event) {
   if (event.target.type === 'file') { delete event.target._draftFiles; showDraftFiles(event.target); }
