@@ -43,7 +43,7 @@
 
     .form-group { margin-bottom: 14px; }
     label { display: block; margin-bottom: 5px; font-weight: bold; font-size: 13px; }
-    input[type="text"], select { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
+    input[type="text"], input[type="search"], input[type="url"], select { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
     .file-picker { display: inline-flex; position: relative; overflow: hidden; margin: 4px 0; padding: 10px 14px; border: 1px solid #217ac0; border-radius: 8px; color: #1665a6; background: #eef5ff; cursor: pointer; }
     .file-picker input[type="file"] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
     .file-picker.drop-target { display: inline-grid; gap: 4px; }
@@ -156,6 +156,12 @@
       font-family: Arial, sans-serif; font-size: 14px; font-weight: 600; line-height: 1.4;
       text-align: center; text-decoration: none; cursor: pointer;
     }
+    #cg-download { margin-bottom: 12px; }
+    .contractor-combo { position: relative; }
+    .contractor-options { position: absolute; left: 0; right: 0; top: 100%; z-index: 20; max-height: 240px; overflow-y: auto; background: #fff; border: 1px solid #ccc; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,.12); }
+    .contractor-options button { display: block; width: 100%; padding: 10px; border: 0; background: #fff; color: #222; text-align: left; font-size: 14px; cursor: pointer; }
+    .contractor-options button:hover, .contractor-options button:focus-visible { background: #eaf4ff; }
+    .contractor-options div { padding: 10px; color: #666; }
     .contract-pdf-action:disabled { opacity: .65; cursor: wait; }
     .contract-pdf-action:focus-visible { outline: 3px solid #9dcdf4; outline-offset: 2px; }
     #cg-download-result {
@@ -460,8 +466,11 @@
       </div>
       <div class="form-group">
         <label>Подрядчик (для договора)</label>
-        <input type="search" id="cg-contractor-search" placeholder="Начните вводить название подрядчика" aria-label="Поиск подрядчика для договора" autocomplete="off">
-        <select id="cg-contractor"><option value="">⏳ Загрузка...</option></select>
+        <div id="cg-contractor-combo" class="contractor-combo">
+          <input type="search" id="cg-contractor-search" placeholder="— Выберите подрядчика —" aria-label="Подрядчик (для договора)" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="cg-contractor-options" autocomplete="off">
+          <div id="cg-contractor-options" class="contractor-options" role="listbox" aria-label="Подрядчики" hidden></div>
+        </div>
+        <select id="cg-contractor" hidden aria-hidden="true" tabindex="-1"><option value="">— Выберите подрядчика —</option></select>
         <div class="doc-meta-actions">
           <button type="button" class="doc-meta-refresh" id="cg-refresh-doc-meta">🔄 Обновить список</button>
           <span class="doc-meta-status" role="status"></span>
@@ -2499,23 +2508,102 @@ function bindDeliveryActions(list) {
   });
 }
 
+
+function closeContractorSuggestions() {
+  document.getElementById('cg-contractor-options').hidden = true;
+  document.getElementById('cg-contractor-search').setAttribute('aria-expanded', 'false');
+}
+function showContractorSuggestions() {
+  var input = document.getElementById('cg-contractor-search');
+  var list = document.getElementById('cg-contractor-options');
+  if (input.disabled) return;
+  var query = input.value.trim().toLowerCase();
+  list.replaceChildren();
+  var matches = docMetaCache && docMetaCache.status === 'ok' ? docMetaCache.contractors.filter(function(c) {
+    return (c.display + ' ' + c.key).toLowerCase().includes(query);
+  }) : [];
+  matches.forEach(function(contractor) {
+    var option = document.createElement('button');
+    option.type = 'button';
+    option.setAttribute('role', 'option');
+    option.textContent = contractor.display;
+    option.addEventListener('click', function() {
+      if (input.disabled) return;
+      var select = document.getElementById('cg-contractor');
+      select.value = contractor.key;
+      input.value = contractor.display;
+      select.dispatchEvent(new Event('change', {bubbles:true}));
+      closeContractorSuggestions();
+      input.focus();
+      closeContractorSuggestions();
+    });
+    list.appendChild(option);
+  });
+  if (!matches.length) {
+    var message = document.createElement('div');
+    message.textContent = docMetaCache ? 'Подрядчик не найден' : 'Список подрядчиков загружается…';
+    list.appendChild(message);
+  }
+  list.hidden = false;
+  input.setAttribute('aria-expanded', 'true');
+}
 document.getElementById('cg-contractor-search').addEventListener('input', function() {
-  fillDocSelects(document.getElementById('cg-contractor'), null);
+  var select = document.getElementById('cg-contractor');
+  if (select.value) {
+    select.value = '';
+    select.dispatchEvent(new Event('change', {bubbles:true}));
+  }
+  showContractorSuggestions();
 });
+document.getElementById('cg-contractor-search').addEventListener('focus', showContractorSuggestions);
+document.getElementById('cg-contractor-search').addEventListener('keydown', function(event) {
+  if (event.key === 'Escape') { closeContractorSuggestions(); return; }
+  if (event.key === 'Enter') event.preventDefault();
+  if (event.key === 'ArrowDown' || event.key === 'Enter') {
+    if (document.getElementById('cg-contractor-options').hidden) showContractorSuggestions();
+    var first = document.querySelector('#cg-contractor-options button');
+    if (first) { event.preventDefault(); first.focus(); }
+  }
+});
+document.getElementById('cg-contractor-options').addEventListener('keydown', function(event) {
+  var options = Array.from(this.querySelectorAll('button'));
+  var index = options.indexOf(document.activeElement);
+  if (event.key === 'Escape') {
+    document.getElementById('cg-contractor-search').focus();
+    closeContractorSuggestions();
+  }
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault();
+    options[Math.max(0, Math.min(options.length - 1, index + (event.key === 'ArrowDown' ? 1 : -1)))].focus();
+  }
+});
+document.getElementById('cg-contractor-combo').addEventListener('focusout', function(event) {
+  if (!this.contains(event.relatedTarget)) closeContractorSuggestions();
+});
+document.addEventListener('click', function(event) {
+  if (!document.getElementById('cg-contractor-combo').contains(event.target)) closeContractorSuggestions();
+});
+
+
 function fillDocSelects(contractorSelect, signerSelect) {
   if (!docMetaCache || docMetaCache.status !== 'ok') return;
 
   if (contractorSelect) {
     var selectedContractor = contractorSelect.value;
     contractorSelect.innerHTML = '<option value="">— Выберите подрядчика —</option>';
-    var query = contractorSelect.id === 'cg-contractor' && currentRequestMode === 'project' ? document.getElementById('cg-contractor-search').value.trim().toLowerCase() : '';
-    docMetaCache.contractors.filter(function(c) { return !query || c.display.toLowerCase().includes(query) || c.key === selectedContractor; }).forEach(function(c) {
+    docMetaCache.contractors.forEach(function(c) {
       var opt = document.createElement('option');
       opt.value = c.key;
       opt.textContent = c.display;
       contractorSelect.appendChild(opt);
     });
     contractorSelect.value = selectedContractor;
+    if (contractorSelect.id === 'cg-contractor') {
+      var input = document.getElementById('cg-contractor-search');
+      var chosen = docMetaCache.contractors.find(function(c) { return c.key === contractorSelect.value; });
+      if (chosen) input.value = chosen.display;
+      if (document.activeElement === input) showContractorSuggestions();
+    }
   }
 
   if (signerSelect) {
@@ -2623,6 +2711,10 @@ function restoreDraftControls(container, fields, idsOnly) {
       if (el.tagName === 'SELECT' && field.value && !Array.prototype.some.call(el.options, function(o) { return o.value === field.value; })) {
         var option = document.createElement('option'); option.value = field.value; option.textContent = field.value; el.appendChild(option);
       }
+      if (el.id === 'cg-contractor' && field.value) {
+        var item = docMetaCache && docMetaCache.contractors.find(function(c) { return c.key === field.value; });
+        document.getElementById('cg-contractor-search').value = item ? item.display : field.value;
+      }
       el.value = field.value == null ? '' : field.value;
       if (el.type === 'checkbox' || el.type === 'radio') el.checked = !!field.checked;
     }
@@ -2640,6 +2732,7 @@ function setDraftReadOnly(readOnly) {
 
 function resetDraftForm() {
   setDraftReadOnly(false);
+  closeContractorSuggestions();
   activeDraft = null; draftDirty = false; draftEpoch++;
   pendingWorkSubmission = null; pendingDoplataSubmission = null; purchaseBatchKey = ''; pendingPurchasePayload = null;
   document.getElementById('add-purchase-item').disabled = false;
