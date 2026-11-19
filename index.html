@@ -460,6 +460,7 @@
       </div>
       <div class="form-group">
         <label>Подрядчик (для договора)</label>
+        <input type="search" id="cg-contractor-search" placeholder="Начните вводить название подрядчика" aria-label="Поиск подрядчика для договора" autocomplete="off">
         <select id="cg-contractor"><option value="">⏳ Загрузка...</option></select>
         <div class="doc-meta-actions">
           <button type="button" class="doc-meta-refresh" id="cg-refresh-doc-meta">🔄 Обновить список</button>
@@ -477,9 +478,11 @@
       <div class="form-group"><label>Конец работ</label><input type="date" id="cg-end"></div>
       <div class="form-group"><label>Сумма ИТОГО</label><input type="text" id="cg-price" placeholder="100 000"></div>
       <div class="form-group"><label>Аванс %</label><input type="text" id="cg-adv" value="30"></div>
+      <div class="form-group project-only"><label for="cg-estimate-url">Ссылка на типовую смету (если смету требуется сформировать)</label><input type="url" id="cg-estimate-url" placeholder="https://docs.google.com/spreadsheets/d/…/edit#gid=…"></div>
       <button type="button" class="contract-pdf-action" id="cg-download">📥 Скачать договор (без заявки)</button>
+      <button type="button" class="contract-pdf-action" id="cg-download-estimate">📥 Скачать смету</button>
       <div id="cg-download-result" style="display:none;">
-        <div class="contract-pdf-title">✅ Договор создан без заявки</div>
+        <div class="contract-pdf-title" id="cg-result-title">✅ Договор создан без заявки</div>
         <div id="cg-download-status" role="status" aria-live="polite"></div>
         <div id="cg-download-filename"></div>
         <div class="contract-pdf-actions">
@@ -1509,13 +1512,15 @@ function collectStandaloneContract() {
     ndsRate: value('cg-nds-rate'), contractorKey: value('cg-contractor'), signerKey: value('cg-signer'),
     workKind: value('cg-work-kind'), docNum: value('cg-num'), docDate: formatDateRu(value('cg-date')),
     objAddress: value('cg-addr'), startDate: formatDateRu(value('cg-start')), endDate: formatDateRu(value('cg-end')),
-    price: amount, advPercent: advance };
+    price: amount, advPercent: advance, estimateUrl: currentRequestMode === 'project' ? value('cg-estimate-url') : '' };
 }
 
-document.getElementById('cg-download').addEventListener('click', async function() {
-  var button = this;
+async function createStandaloneDocuments() {
+  var button = document.getElementById('cg-download');
+  if (button.disabled) return;
   try {
     var contract = collectStandaloneContract();
+    if (contract.estimateUrl && !/^https:\/\/docs\.google\.com\/spreadsheets\/d\/[A-Za-z0-9_-]+\//.test(contract.estimateUrl)) throw new Error('Укажите ссылку на Google Таблицу со сметой');
     var signature = JSON.stringify(contract);
     if (!standaloneContractRequest || standaloneContractRequest.signature !== signature) {
       standaloneContractRequest = { signature: signature, requestKey: 'contract_' + Date.now() + '_' + Math.random().toString(36).slice(2) };
@@ -1526,12 +1531,20 @@ document.getElementById('cg-download').addEventListener('click', async function(
       requestKey: standaloneContractRequest.requestKey, contract: contract });
     standaloneContractResult = result;
     document.getElementById('cg-download-result').style.display = 'block';
-    document.getElementById('cg-download-status').textContent = 'PDF и ссылка отправлены в ваш личный Telegram.';
-    document.getElementById('cg-download-filename').textContent = result.filename;
+    document.getElementById('cg-download-status').textContent = result.estimate ? 'Ссылки на договор и смету отправлены одним сообщением в ваш Telegram.' : 'PDF и ссылка отправлены в ваш личный Telegram.';
+    document.getElementById('cg-download-filename').textContent = result.filename + (result.estimate ? ' · ' + result.estimate.filename : '');
+    document.getElementById('cg-result-title').textContent = result.estimate ? '✅ Договор и смета созданы без заявки' : '✅ Договор создан без заявки';
     document.getElementById('cg-pdf-link').href = result.fileUrl;
-    showAlert('✅ Договор готов. Нажмите «Сохранить PDF», чтобы выбрать способ сохранения. PDF также отправлен в личный Telegram.');
+    showAlert(result.estimate ? '✅ Договор и смета созданы без заявки. Ссылки отправлены одним сообщением в Telegram.' : '✅ Договор готов. Нажмите «Сохранить PDF», чтобы выбрать способ сохранения.');
+    return result;
   } catch(err) { showAlert('❌ ' + err.message + '\nПри потере ответа повторите с теми же параметрами договора.'); }
   finally { button.disabled = false; button.textContent = '📥 Скачать договор (без заявки)'; }
+}
+document.getElementById('cg-download').addEventListener('click', createStandaloneDocuments);
+document.getElementById('cg-download-estimate').addEventListener('click', async function() {
+  if (!document.getElementById('cg-estimate-url').value.trim()) { showAlert('Укажите ссылку на типовую смету'); return; }
+  var result = await createStandaloneDocuments.call(document.getElementById('cg-download'));
+  if (result && result.estimate) await saveStandalonePdf(result.estimate);
 });
 
 function standalonePdfBlob(result) {
@@ -1541,9 +1554,7 @@ function standalonePdfBlob(result) {
   return new Blob([bytes], { type: 'application/pdf' });
 }
 
-document.getElementById('cg-save-pdf').addEventListener('click', async function() {
-  var result = standaloneContractResult;
-  if (!result) { showAlert('Сначала сформируйте договор'); return; }
+async function saveStandalonePdf(result) {
   try {
     if (result.pdfBase64 && typeof window.showSaveFilePicker === 'function') {
       var handle = await window.showSaveFilePicker({ suggestedName: result.filename,
@@ -1567,7 +1578,26 @@ document.getElementById('cg-save-pdf').addEventListener('click', async function(
     else window.open(result.fileUrl, '_blank');
   } catch(err) {
     if (err.name !== 'AbortError') showAlert('Не удалось сохранить через интерфейс. PDF доступен в личном Telegram и по ссылке Google Drive.');
+    return false;
   }
+}
+document.getElementById('cg-save-pdf').addEventListener('click', async function() {
+  var result = standaloneContractResult;
+  if (!result) { showAlert('Сначала сформируйте договор'); return; }
+  if (result.estimate && window.showDirectoryPicker && result.pdfBase64 && result.estimate.pdfBase64) {
+    try {
+      var directory = await window.showDirectoryPicker({mode:'readwrite'});
+      for (var pdf of [result, result.estimate]) {
+        var handle = await directory.getFileHandle(pdf.filename, {create:true});
+        var writable = await handle.createWritable();
+        await writable.write(standalonePdfBlob(pdf)); await writable.close();
+      }
+      showAlert('Договор и смета сохранены');
+    } catch(err) { if (err.name !== 'AbortError') showAlert('Не удалось сохранить оба PDF. Используйте ссылки из Telegram.'); }
+    return;
+  }
+  if (await saveStandalonePdf(result) === false) return;
+  if (result.estimate) await saveStandalonePdf(result.estimate);
 });
 
 var cgNds = 'С НДС';
@@ -2469,13 +2499,17 @@ function bindDeliveryActions(list) {
   });
 }
 
+document.getElementById('cg-contractor-search').addEventListener('input', function() {
+  fillDocSelects(document.getElementById('cg-contractor'), null);
+});
 function fillDocSelects(contractorSelect, signerSelect) {
   if (!docMetaCache || docMetaCache.status !== 'ok') return;
 
   if (contractorSelect) {
     var selectedContractor = contractorSelect.value;
     contractorSelect.innerHTML = '<option value="">— Выберите подрядчика —</option>';
-    docMetaCache.contractors.forEach(function(c) {
+    var query = contractorSelect.id === 'cg-contractor' && currentRequestMode === 'project' ? document.getElementById('cg-contractor-search').value.trim().toLowerCase() : '';
+    docMetaCache.contractors.filter(function(c) { return !query || c.display.toLowerCase().includes(query) || c.key === selectedContractor; }).forEach(function(c) {
       var opt = document.createElement('option');
       opt.value = c.key;
       opt.textContent = c.display;
