@@ -1563,9 +1563,13 @@ function standalonePdfBlob(result) {
   return new Blob([bytes], { type: 'application/pdf' });
 }
 
+function canUsePdfPicker() {
+  return !(tg && tg.platform === 'tdesktop') &&
+    (typeof navigator === 'undefined' || !navigator.userActivation || navigator.userActivation.isActive);
+}
 async function saveStandalonePdf(result) {
   try {
-    if (result.pdfBase64 && typeof window.showSaveFilePicker === 'function') {
+    if (result.pdfBase64 && canUsePdfPicker() && typeof window.showSaveFilePicker === 'function') {
       var handle = await window.showSaveFilePicker({ suggestedName: result.filename,
         types: [{ description: 'PDF', accept: { 'application/pdf': ['.pdf'] } }] });
       var writable = await handle.createWritable();
@@ -1593,7 +1597,7 @@ async function saveStandalonePdf(result) {
 document.getElementById('cg-save-pdf').addEventListener('click', async function() {
   var result = standaloneContractResult;
   if (!result) { showAlert('Сначала сформируйте договор'); return; }
-  if (result.estimate && window.showDirectoryPicker && result.pdfBase64 && result.estimate.pdfBase64) {
+  if (result.estimate && canUsePdfPicker() && window.showDirectoryPicker && result.pdfBase64 && result.estimate.pdfBase64) {
     try {
       var directory = await window.showDirectoryPicker({mode:'readwrite'});
       for (var pdf of [result, result.estimate]) {
@@ -1893,6 +1897,7 @@ document.getElementById('megaForm').addEventListener('submit', async function(e)
 
     if ((currentMain === 'status1' || currentMain === 'status3') && contractGenerateMode) {
       payload.contractGenerate  = true;
+      payload.contractEstimateUrl = currentRequestMode === 'project' ? document.getElementById('cg-estimate-url').value.trim() : '';
       payload.contractWorkType  = currentSub === 'давальческое' ? 'Давальческие' : 'Иждивение';
       payload.contractNds       = cgNds;
       payload.contractNdsRate   = document.getElementById('cg-nds-rate').value;
@@ -1929,7 +1934,7 @@ document.getElementById('megaForm').addEventListener('submit', async function(e)
 
     var isLinkedDoplata = currentRequestMode === 'project' && currentMain === 'status2' && linkedOrderId && linkedOrderId !== '__none__';
     var submissionResult = isLinkedDoplata ? await sendDoplataWithRecovery(payload)
-      : (currentRequestMode === 'maintenance_work' || massFiles.length || pendingWorkSubmission
+      : (currentRequestMode === 'maintenance_work' || massFiles.length || payload.contractEstimateUrl || pendingWorkSubmission
         ? await sendWorkWithRecovery(payload) : await postJson(payload));
     invalidateOrdersCache();
 
