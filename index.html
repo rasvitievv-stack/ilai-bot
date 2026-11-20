@@ -482,6 +482,7 @@
       </div>
       <div class="form-group"><label>№ договора</label><input type="text" id="cg-num"></div>
       <div class="form-group"><label>Дата договора</label><input type="date" id="cg-date"></div>
+      <div class="form-group"><label for="cg-branch">Выбрать филиал</label><div class="contractor-combo" id="cg-branch-combo"><input type="search" id="cg-branch" placeholder="Начните вводить или введите вручную" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="cg-branch-options" autocomplete="off"><div class="contractor-options" id="cg-branch-options" role="listbox" hidden></div></div><input type="hidden" id="cg-branch-key"></div>
       <div class="form-group"><label>Адрес объекта</label><input type="text" id="cg-addr"></div>
       <div class="form-group"><label>Начало работ</label><input type="date" id="cg-start"></div>
       <div class="form-group"><label>Конец работ</label><input type="date" id="cg-end"></div>
@@ -506,6 +507,7 @@
     </div>
   </div>
 
+  <div class="form-box active" id="extra-estimate-block" style="display:none"><div class="form-group"><label for="eg-estimate-url">Ссылка на типовую смету (если смету требуется сформировать)</label><input type="url" id="eg-estimate-url" placeholder="https://docs.google.com/spreadsheets/d/…/edit#gid=…"></div><div id="extra-estimate-fields" hidden><div class="form-group"><label>Подрядчик для сметы</label><select id="eg-contractor"><option value="">— Выберите подрядчика —</option></select></div><div class="form-group"><label>Наш подписант</label><select id="eg-signer"><option value="">— Выберите подписанта —</option></select></div><div class="form-group"><label>НДС сметы</label><select id="eg-nds"><option value="Без НДС">Без НДС</option><option value="С НДС">С НДС</option></select></div><div class="form-group" id="eg-rate-group" hidden><label>Ставка НДС, %</label><input type="number" id="eg-rate" min="0" max="100" step="0.01" value="22"></div><div class="form-group"><label>№ Основного договора</label><input type="text" id="eg-num"></div><div class="form-group"><label>Дата Основного договора</label><input type="date" id="eg-date"></div><div class="form-group"><label for="eg-branch">Выбрать филиал</label><div class="contractor-combo" id="eg-branch-combo"><input type="search" id="eg-branch" placeholder="Начните вводить или введите вручную" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="eg-branch-options" autocomplete="off"><div class="contractor-options" id="eg-branch-options" role="listbox" hidden></div></div><input type="hidden" id="eg-branch-key"></div><div class="form-group"><label>Адрес объекта</label><input type="text" id="eg-addr"></div><button type="button" class="contract-pdf-action" id="eg-download">📥 Скачать смету (без заявки)</button><div id="eg-result" role="status"></div></div></div>
   <form id="megaForm">
     <div id="form-fields" class="form-box">
       <div class="form-group project-only">
@@ -1122,6 +1124,7 @@ function selectRequestMode(mode) {
   document.getElementById('common-documents').style.display = currentRequestMode === 'maintenance_purchase' ? 'none' : 'block';
   document.getElementById('contract-block').style.display = currentRequestMode !== 'maintenance_purchase' && (currentMain === 'status1' || currentMain === 'status3') ? 'block' : 'none';
 
+  updateExtraEstimateVisibility();
   if (currentMain === 'status2') {
     document.getElementById('doplata-block').style.display = maintenance ? 'none' : 'block';
     if (!maintenance) loadDoplataOrders();
@@ -1190,6 +1193,7 @@ function selectMain(type) {
   document.getElementById('i-m15').value = '';
   resetWorkVariantButtons();
   resetDsGenerateCheckbox();
+  updateExtraEstimateVisibility();
   document.getElementById('form-fields').classList.remove('active');
   document.getElementById('cg-ks-row').style.display = (type === 'status3') ? 'flex' : 'none';
   document.getElementById('cg-ks-checkbox').checked = false;
@@ -1312,6 +1316,7 @@ document.getElementById('doplata-order-select').addEventListener('change', funct
     document.getElementById('contractor').value = '';
     document.getElementById('branch').value     = '';
     currentLinkedContractMeta = null;
+    fillExtraEstimateDefaults(null);
     currentSub = '';
     resetWorkVariantButtons();
     document.getElementById('m15-group').style.display = 'none';
@@ -1324,7 +1329,7 @@ document.getElementById('doplata-order-select').addEventListener('change', funct
 
   var order = cachedOrders.find(function(o) { return o.id === selectedId; });
   if (!order) {
-    infoBlock.style.display = 'none'; currentLinkedContractMeta = null;
+    infoBlock.style.display = 'none'; currentLinkedContractMeta = null; fillExtraEstimateDefaults(null);
     document.getElementById('i-m15').value = '';
     if (document.getElementById('ds-need-checkbox').checked) fillLinkedDsDefaults();
     return;
@@ -1356,6 +1361,7 @@ document.getElementById('doplata-order-select').addEventListener('change', funct
   }
 
   currentLinkedContractMeta = order.contractMeta || null;
+  fillExtraEstimateDefaults(order);
 
   var endDateHint = document.getElementById('dg-end-date-hint');
   if (currentLinkedContractMeta && currentLinkedContractMeta.endDate) {
@@ -1489,6 +1495,7 @@ document.getElementById('contract-mode-upload').addEventListener('click', functi
   document.getElementById('contract-mode-generate').classList.remove('active');
   document.getElementById('contract-upload-part').style.display = 'block';
   document.getElementById('contract-generate-part').style.display = 'none';
+  updateExtraEstimateVisibility();
 });
 document.getElementById('contract-mode-generate').addEventListener('click', function() {
   contractGenerateMode = true;
@@ -1496,6 +1503,7 @@ document.getElementById('contract-mode-generate').addEventListener('click', func
   document.getElementById('contract-mode-upload').classList.remove('active');
   document.getElementById('contract-upload-part').style.display = 'none';
   document.getElementById('contract-generate-part').style.display = 'block';
+  updateExtraEstimateVisibility();
 });
 
 document.getElementById('cg-contractor').addEventListener('change', function() {
@@ -1512,6 +1520,7 @@ function collectStandaloneContract() {
   var value = function(id) { return document.getElementById(id).value.trim(); };
   if (!value('cg-contractor') || !value('cg-signer') || !value('cg-num') || !value('cg-addr')) throw new Error('Заполните подрядчика, подписанта, номер договора и адрес объекта');
   if (!value('cg-date') || !value('cg-start') || !value('cg-end')) throw new Error('Заполните даты договора и работ');
+  if (value('cg-date') > value('cg-start') || value('cg-date') > value('cg-end')) throw new Error('Дата договора не может быть позже начала или окончания работ');
   if (value('cg-end') < value('cg-start')) throw new Error('Конец работ не может быть раньше начала');
   var amount = value('cg-price').replace(/\s/g, '').replace(',', '.');
   if (!/^\d+(?:\.\d{1,2})?$/.test(amount) || Number(amount) <= 0) throw new Error('Укажите корректную сумму договора');
@@ -1520,7 +1529,7 @@ function collectStandaloneContract() {
   return { workType: currentSub === 'давальческое' ? 'Давальческие' : 'Иждивение', nds: cgNds,
     ndsRate: value('cg-nds-rate'), contractorKey: value('cg-contractor'), signerKey: value('cg-signer'),
     workKind: value('cg-work-kind'), docNum: value('cg-num'), docDate: formatDateRu(value('cg-date')),
-    objAddress: value('cg-addr'), startDate: formatDateRu(value('cg-start')), endDate: formatDateRu(value('cg-end')),
+    branchName:value('cg-branch'), branchKey:value('cg-branch-key'), objAddress: value('cg-addr'), startDate: formatDateRu(value('cg-start')), endDate: formatDateRu(value('cg-end')),
     price: amount, advPercent: advance, estimateUrl: currentRequestMode === 'project' ? value('cg-estimate-url') : '' };
 }
 
@@ -1632,7 +1641,7 @@ function formatDateRu(isoDate) {
   if (!isoDate) return '';
   var parts = isoDate.split('-'); // yyyy-mm-dd
   if (parts.length !== 3) return isoDate;
-  var d = parseInt(parts[2], 10);
+  var d = parts[2].padStart(2, '0');
   return d + '.' + parts[1] + '.' + parts[0];
 }
 
@@ -1834,16 +1843,7 @@ document.getElementById('megaForm').addEventListener('submit', async function(e)
   }
 
   if ((currentMain === 'status1' || currentMain === 'status3') && contractGenerateMode) {
-    if (!document.getElementById('cg-contractor').value) { showAlert('Выберите подрядчика для договора!'); return; }
-    if (!document.getElementById('cg-signer').value)      { showAlert('Выберите подписанта для договора!'); return; }
-    if (!document.getElementById('cg-num').value.trim())  { showAlert('Укажите номер договора!'); return; }
-
-    var cgDocDateVal   = document.getElementById('cg-date').value;
-    var cgStartDateVal = document.getElementById('cg-start').value;
-    if (cgDocDateVal && cgStartDateVal && cgDocDateVal > cgStartDateVal) {
-      showAlert('Дата договора не может быть позже даты начала работ!');
-      return;
-    }
+    try { collectStandaloneContract(); } catch(err) { showAlert(err.message); return; }
   }
 
   var dsGenerateChecked = currentRequestMode === 'project' && currentMain === 'status2' && document.getElementById('ds-need-checkbox').checked;
@@ -1855,6 +1855,9 @@ document.getElementById('megaForm').addEventListener('submit', async function(e)
 
     var dgDsDateVal = document.getElementById('dg-date').value;
 
+    var mainDate = document.getElementById('dg-main-date').value, start = document.getElementById('dg-start').value, end = document.getElementById('dg-end').value;
+    if (start && end && end < start) { showAlert('Конец работ не может быть раньше начала'); return; }
+    if (mainDate && ((start && mainDate > start) || (end && mainDate > end))) { showAlert('Дата договора не может быть позже начала или окончания работ'); return; }
     if (dgDsDateVal && currentLinkedContractMeta && currentLinkedContractMeta.endDate) {
       var mainEndIso = ruDateToIso(currentLinkedContractMeta.endDate);
       if (mainEndIso && dgDsDateVal > mainEndIso) {
@@ -1896,6 +1899,9 @@ document.getElementById('megaForm').addEventListener('submit', async function(e)
     };
 
     if ((currentMain === 'status1' || currentMain === 'status3') && contractGenerateMode) {
+      payload.documentBranchName = document.getElementById('cg-branch').value.trim();
+      payload.documentBranchKey = document.getElementById('cg-branch-key').value;
+      payload.documentAddress = document.getElementById('cg-addr').value.trim();
       payload.contractGenerate  = true;
       payload.contractEstimateUrl = currentRequestMode === 'project' ? document.getElementById('cg-estimate-url').value.trim() : '';
       payload.contractWorkType  = currentSub === 'давальческое' ? 'Давальческие' : 'Иждивение';
@@ -1932,6 +1938,14 @@ document.getElementById('megaForm').addEventListener('submit', async function(e)
       payload.ksGenerate         = document.getElementById('dg-ks-checkbox').checked;
     }
 
+    if (currentRequestMode === 'project' && !payload.contractGenerate && document.getElementById('eg-estimate-url').value.trim()) {
+      payload.estimateData = collectExtraEstimate();
+      payload.contractEstimateUrl = payload.estimateData.estimateUrl;
+      payload.documentBranchName = payload.estimateData.branchName; payload.documentBranchKey = payload.estimateData.branchKey; payload.documentAddress = payload.estimateData.objAddress;
+    }
+    if (dsGenerateChecked && !payload.estimateData && currentLinkedContractMeta) {
+      payload.documentBranchName = currentLinkedContractMeta.branchName || ''; payload.documentBranchKey = currentLinkedContractMeta.branchKey || ''; payload.documentAddress = currentLinkedContractMeta.objAddress || '';
+    }
     var isLinkedDoplata = currentRequestMode === 'project' && currentMain === 'status2' && linkedOrderId && linkedOrderId !== '__none__';
     var submissionResult = isLinkedDoplata ? await sendDoplataWithRecovery(payload)
       : (currentRequestMode === 'maintenance_work' || massFiles.length || payload.contractEstimateUrl || pendingWorkSubmission
@@ -2268,7 +2282,7 @@ document.getElementById('fixForm').addEventListener('submit', async function(e) 
 });
 
 // ===== ЗАГРУЗКА СПИСКОВ ПОДРЯДЧИКОВ / ПОДПИСАНТОВ (двухуровневый кэш) =====
-const DOC_META_STORAGE_KEY = 'ilai_doc_meta_v4';
+const DOC_META_STORAGE_KEY = 'ilai_doc_meta_v5';
 const DOC_META_CACHE_TTL_MS = 60 * 60 * 1000;
 var docMetaCache = null;
 var docMetaLoadedAt = 0;
@@ -2286,6 +2300,8 @@ function normalizeDocMeta(result) {
     maintenanceContractors: (Array.isArray(result.maintenanceContractors) ? result.maintenanceContractors : (result.contractors || [])).map(function(c) {
       return { key: String(c.key || ''), display: String(c.display || c.key || '') };
     }).filter(function(c) { return c.key; }),
+    branches: Array.isArray(result.branches) ? result.branches : [],
+    branchError: String(result.branchError || ''),
     maintenanceError: String(result.maintenanceError || ''),
     signers: Array.isArray(result.signers) ? result.signers.map(function(s) {
       return { key: String(s.key || ''), display: String(s.display || s.key || '') };
@@ -2377,6 +2393,7 @@ function setMaintenanceContractorPlaceholder(text) {
 function fillAllDocMetaControls() {
   fillDocSelects(document.getElementById('cg-contractor'), document.getElementById('cg-signer'));
   fillDocSelects(document.getElementById('dg-contractor'), document.getElementById('dg-signer'));
+  fillDocSelects(document.getElementById('eg-contractor'), document.getElementById('eg-signer'));
   fillMaintenanceContractorHints();
 }
 
@@ -2761,6 +2778,11 @@ function resetDraftForm() {
   document.getElementById('contract-mode-generate').classList.remove('active');
   document.getElementById('cg-btn-nds').click(); document.getElementById('dg-btn-nds').click();
   standaloneContractRequest = null; standaloneContractResult = null;
+  extraEstimateRequest = null;
+  document.getElementById('extra-estimate-fields').hidden = true;
+  document.getElementById('eg-result').replaceChildren();
+  ['cg','eg'].forEach(function(p){document.getElementById(p+'-addr').readOnly=false;document.getElementById(p+'-branch-options').hidden=true;});
+  ['cg-date','cg-start','cg-end'].forEach(function(id){document.getElementById(id).removeAttribute('min');document.getElementById(id).removeAttribute('max');});
   selectRequestMode('project');
   draftDirty = false; updateDraftClosingGuard();
   document.getElementById('draft-status').textContent = '';
@@ -2795,6 +2817,8 @@ async function restoreDraftState(state, readOnly) {
     el.classList.toggle('active', !!saved.active);
   });
   document.getElementById('cg-download-result').style.display = 'none';
+  updateExtraEstimateVisibility();
+  ['cg','eg'].forEach(function(p){var key=document.getElementById(p+'-branch-key').value, name=document.getElementById(p+'-branch').value, addr=document.getElementById(p+'-addr');var b=(docMetaCache && docMetaCache.branches || []).find(function(b){return String(b.key)===key && b.name===name && b.address===addr.value;});addr.readOnly=!!(b&&b.address);});
   if (!order) document.getElementById('linked-order-info').style.display = 'none';
   var submission = state.submission || {};
   pendingWorkSubmission = submission.work || null;
@@ -3054,6 +3078,68 @@ document.getElementById('screen-new').addEventListener('click', function(event) 
   if (button && !['back-from-new','save-draft','submit-new','refresh-doc-meta','cg-download','cg-save-pdf'].includes(button.id)) markDraftDirty();
 });
 window.addEventListener('beforeunload', function(event) { if (draftDirty && !draftReadOnly) { event.preventDefault(); event.returnValue = ''; } });
+
+// Branch selection stays editable; typing invalidates the directory key.
+function setupBranchCombo(prefix) {
+  var input=document.getElementById(prefix+'-branch'), list=document.getElementById(prefix+'-branch-options'), key=document.getElementById(prefix+'-branch-key'), address=document.getElementById(prefix+'-addr');
+  function close(){list.hidden=true;input.setAttribute('aria-expanded','false');}
+  function show(){
+    list.replaceChildren();
+    var branches=docMetaCache && docMetaCache.branches || [], query=input.value.trim().toLowerCase();
+    branches.filter(function(b){return b.name.toLowerCase().includes(query);}).forEach(function(b){
+      var option=document.createElement('button');option.type='button';option.role='option';option.textContent=b.name;
+      option.addEventListener('click',function(){key.value=b.key;input.value=b.name;address.value=b.address||'';address.readOnly=!!b.address; if(currentRequestMode==='project')document.getElementById('branch').value=b.name;close();markDraftDirty();});list.appendChild(option);
+    });
+    if(!list.children.length){var hint=document.createElement('div');hint.textContent=docMetaCache && docMetaCache.branchError || 'Можно ввести название филиала и адрес вручную';list.appendChild(hint);}
+    list.hidden=false;input.setAttribute('aria-expanded','true');
+  }
+  input.addEventListener('input',function(){if(key.value){address.value='';}key.value='';address.readOnly=false;if(currentRequestMode==='project')document.getElementById('branch').value=input.value.trim();show();});
+  input.addEventListener('focus',show);
+  input.addEventListener('keydown',function(e){if(e.key==='Escape')close();if(e.key==='ArrowDown'){e.preventDefault();show();var first=list.querySelector('button');if(first)first.focus();}if(e.key==='Enter'){e.preventDefault();close();}});
+  list.addEventListener('keydown',function(e){var buttons=Array.from(list.querySelectorAll('button')),i=buttons.indexOf(document.activeElement);if(e.key==='Escape'){input.focus();close();}if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();buttons[Math.max(0,Math.min(buttons.length-1,i+(e.key==='ArrowDown'?1:-1)))].focus();}});
+  document.getElementById(prefix+'-branch-combo').addEventListener('focusout',function(e){if(!this.contains(e.relatedTarget))close();});
+}
+setupBranchCombo('cg'); setupBranchCombo('eg');
+function updateExtraEstimateVisibility(){
+  var visible=currentRequestMode==='project' && !!currentMain && (currentMain==='status2'||!contractGenerateMode);
+  document.getElementById('extra-estimate-block').style.display=visible?'block':'none';
+  if(visible)loadDocMeta('eg-contractor','eg-signer');
+}
+function fillExtraEstimateDefaults(order){
+  var meta=order && order.contractMeta || {};
+  function fill(id,value){var el=document.getElementById(id);if(el.tagName==='SELECT' && value && !Array.from(el.options).some(function(o){return o.value===String(value);})){var option=document.createElement('option');option.value=value;option.textContent=value;el.appendChild(option);}el.value=value||'';}
+  fillDocSelects(document.getElementById('eg-contractor'), document.getElementById('eg-signer'));
+  fill('eg-contractor',meta.contractorKey);fill('eg-signer',meta.signerKey);fill('eg-num',meta.docNum);fill('eg-date',ruDateToIso(meta.docDate||''));
+  fill('eg-addr',meta.objAddress);fill('eg-branch',meta.branchName || order && order.branch);fill('eg-branch-key',meta.branchKey);
+  document.getElementById('eg-addr').readOnly=false;
+  fill('eg-nds',meta.nds||'Без НДС');fill('eg-rate',meta.ndsRate||'22');
+  document.getElementById('eg-rate-group').hidden=meta.nds!=='С НДС';
+}
+document.getElementById('eg-estimate-url').addEventListener('input',function(){document.getElementById('extra-estimate-fields').hidden=!this.value.trim();});
+document.getElementById('eg-nds').addEventListener('change',function(){document.getElementById('eg-rate-group').hidden=this.value!=='С НДС';});
+document.getElementById('eg-contractor').addEventListener('change',function(){var item=docMetaCache && docMetaCache.contractors.find(function(c){return c.key===this.value;},this);if(item){document.getElementById('eg-nds').value=item.ndsRate?'С НДС':'Без НДС';document.getElementById('eg-rate').value=item.ndsRate||'22';document.getElementById('eg-nds').dispatchEvent(new Event('change'));}});
+function collectExtraEstimate(){
+  var value=function(id){return document.getElementById(id).value.trim();};
+  if(!value('eg-contractor')||!value('eg-signer')||!value('eg-num')||!value('eg-date')||!value('eg-addr'))throw new Error('Заполните подрядчика, подписанта, номер и дату договора, адрес для сметы');
+  if(!value('eg-estimate-url').startsWith('https://docs.google.com/spreadsheets/d/'))throw new Error('Укажите ссылку на Google Таблицу со сметой');
+  if(value('eg-nds')==='С НДС' && (!value('eg-rate') || !isFinite(Number(value('eg-rate'))) || Number(value('eg-rate'))<0 || Number(value('eg-rate'))>100))throw new Error('Укажите ставку НДС от 0 до 100%');
+  return {estimateOnly:true,estimateUrl:value('eg-estimate-url'),contractorKey:value('eg-contractor'),signerKey:value('eg-signer'),docNum:value('eg-num'),docDate:formatDateRu(value('eg-date')),objAddress:value('eg-addr'),branchName:value('eg-branch'),branchKey:value('eg-branch-key'),nds:value('eg-nds'),ndsRate:value('eg-rate')};
+}
+var extraEstimateRequest=null;
+document.getElementById('eg-download').addEventListener('click',async function(){
+  var button=this;if(button.disabled)return;
+  try{var contract=collectExtraEstimate(), signature=JSON.stringify(contract);
+    if(!extraEstimateRequest||extraEstimateRequest.signature!==signature)extraEstimateRequest={signature:signature,key:'estimate_'+Date.now()+'_'+Math.random().toString(36).slice(2)};
+    button.disabled=true;button.textContent='⏳ Формирую смету…';
+    var result=await postJson({mode:'standaloneEstimate',tg_id:tgId,tg_username:tgUsername,contract:contract,requestKey:extraEstimateRequest.key});
+    var status=document.getElementById('eg-result');status.replaceChildren();var link=document.createElement('a');link.href=result.fileUrl;link.target='_blank';link.rel='noopener';link.textContent='✅ Смета создана без заявки. Открыть PDF';status.appendChild(link);
+    var save=document.createElement('button');save.type='button';save.className='contract-pdf-action';save.textContent='💾 Сохранить PDF';save.addEventListener('click',function(){saveStandalonePdf(result);});status.appendChild(save);
+  }catch(err){showAlert(err.message);}finally{button.disabled=false;button.textContent='📥 Скачать смету (без заявки)';}
+});
+['cg-date','cg-start','cg-end'].forEach(function(id){document.getElementById(id).addEventListener('change',function(){
+  var date=document.getElementById('cg-date'),start=document.getElementById('cg-start'),end=document.getElementById('cg-end');
+  date.max=[start.value,end.value].filter(Boolean).sort()[0]||'';start.min=date.value;start.max=end.value;end.min=[date.value,start.value].sort().pop()||'';
+});});
 </script>
 </body>
 </html>
